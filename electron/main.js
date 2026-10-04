@@ -28,6 +28,8 @@ let manager;
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+let appIcon = null; // NativeImage, loaded once (works from inside app.asar for window, tray and toasts)
+const getIcon = () => { if (!appIcon) { appIcon = nativeImage.createFromPath(iconPath); } return appIcon.isEmpty() ? undefined : appIcon; };
 
 // ---------- secrets ----------
 function enc(v) {
@@ -98,7 +100,7 @@ function emit(channel, payload) {
 }
 function notify(title, body) {
   if (!store.settings.get().notifications || !Notification.isSupported()) return;
-  const n = new Notification({ title, body, icon: fs.existsSync(iconPath) ? iconPath : undefined, silent: false });
+  const n = new Notification({ title, body, icon: getIcon(), silent: false });
   n.on('click', () => { if (win) { win.show(); win.focus(); } });
   n.show();
 }
@@ -113,7 +115,7 @@ function createWindow() {
     backgroundColor: '#0a0a0a',
     show: false,
     title: 'ApplyPilot',
-    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    icon: getIcon(),
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#0a0a0a', symbolColor: '#a3a3a3', height: 40 },
     webPreferences: {
@@ -146,8 +148,9 @@ function createWindow() {
 }
 
 function createTray() {
-  if (!fs.existsSync(iconPath)) return;
-  tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }));
+  const icon = getIcon();
+  if (!icon) return;
+  tray = new Tray(icon.resize({ width: 16, height: 16 }));
   tray.setToolTip('ApplyPilot');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open ApplyPilot', click: () => { win.show(); win.focus(); } },
@@ -215,19 +218,23 @@ function registerIpc() {
 
   // resumes
   const resumeOut = (r) => { const { text, ...rest } = r; return { ...rest, skills: (rest.skills || []).map(displaySkill), textLength: (text || '').length }; };
+  // Imports each file independently: one bad/duplicate file never blocks the others.
   const importPaths = async (paths) => {
     const plan = getPlan();
-    const out = [];
+    const results = [];
+    const errors = [];
     for (const p of paths) {
-      if (store.resumes.get().items.length >= plan.resumes) throw new Error(`Your ${plan.label} plan stores up to ${plan.resumes} resumes. Upgrade for more.`);
-      const { resume, guessed } = await resumeLib.importResume(store, p);
-      out.push({ resume: resumeOut(resume), guessed });
+      if (store.resumes.get().items.length >= plan.resumes) { errors.push(`Your ${plan.label} plan stores up to ${plan.resumes} resumes — delete one or upgrade.`); break; }
+      try {
+        const { resume, guessed } = await resumeLib.importResume(store, p);
+        results.push({ resume: resumeOut(resume), guessed });
+      } catch (e) { errors.push(e.message); }
     }
-    return out;
+    return { results, errors };
   };
   handle('resumes:pick', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Upload resume', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Resumes', extensions: ['pdf', 'docx', 'txt', 'md'] }] });
-    if (r.canceled) return [];
+    if (r.canceled) return { results: [], errors: [] };
     return importPaths(r.filePaths);
   });
   handle('resumes:importPaths', (paths) => importPaths(paths));
@@ -240,6 +247,7 @@ function registerIpc() {
     return store.resumes.get().items.map(resumeOut);
   });
   handle('resumes:delete', (id) => { resumeLib.deleteResume(store, id); return store.resumes.get().items.map(resumeOut); });
+  handle('resumes:reparse', async (id) => resumeOut(await resumeLib.reparseResume(store, id)));
   handle('resumes:open', (id) => { const r = store.resumes.get().items.find((x) => x.id === id); if (r) shell.openPath(r.path); });
   handle('resumes:text', (id) => (store.resumes.get().items.find((x) => x.id === id) || {}).text || '');
   handle('resumes:list', () => store.resumes.get().items.map(resumeOut));
@@ -315,6 +323,7 @@ function registerIpc() {
     return manager.patchApp(id, allowed, allowed.status ? { type: 'status', message: `Moved to ${allowed.status}` } : null);
   });
   handle('applications:delete', (id) => { store.applications.update((d) => { d.items = d.items.filter((x) => x.id !== id); }); return true; });
+  handle('applications:deleteMany', (ids) => { const set = new Set(ids || []); store.applications.update((d) => { d.items = d.items.filter((x) => !set.has(x.id)); }); return true; });
   handle('applications:approve', (ids, mode) => { (Array.isArray(ids) ? ids : [ids]).forEach((id) => manager.applyApplication(id, { mode })); return true; });
   handle('applications:cancel', (id) => manager.cancelApplication(id));
   handle('applications:openScreenshot', (id) => { const a = store.applications.get().items.find((x) => x.id === id); if (a && a.screenshotPath) shell.openPath(a.screenshotPath); });
@@ -332,6 +341,21 @@ function registerIpc() {
   handle('qa:delete', (id) => { store.qa.update((d) => { d.items = d.items.filter((x) => x.id !== id); }); return store.qa.get().items; });
 
   handle('activity:list', () => store.activity.get().items.slice(0, 300));
+  handle('activity:clear', () => { store.activity.update((d) => { d.items = []; }); return true; });
+  // Privacy: wipe every ApplyPilot file on this PC (profile, resumes, applications, keys, browser profile) and restart fresh.
+  handle('data:reset', async () => {
+    manager.stopAll();
+    try { if (engine && engine.close) await engine.close(); } catch {}
+    engine = null;
+    store.flushAll();
+    const dir = app.getPath('userData');
+    for (const name of ['data', 'resumes', 'screenshots', 'browser-profile']) {
+      try { fs.rmSync(path.join(dir, name), { recursive: true, force: true }); } catch {}
+    }
+    quitting = true;
+    app.relaunch();
+    app.exit(0);
+  });
 
   // AI
   const aiCall = async (fn, args) => {
@@ -422,12 +446,15 @@ function followUpTick() {
 
 app.whenReady().then(() => {
   store = createStore(app.getPath('userData'));
+  // Every new install starts with a 7-day Pro trial (no card), so onboarding is never blocked by Free limits.
+  store.license.update((d) => { if (!d.trialStartedAt && !d.key) d.trialStartedAt = new Date().toISOString(); });
   manager = new CampaignManager({ store, getEngine, ai, getPlan, emit, notify, companies });
   manager.settings = () => getSettings();
   registerIpc();
   createWindow();
   createTray();
   if (process.argv.includes('--hidden')) win.once('ready-to-show', () => win.hide());
+  resumeLib.migrateResumes(store).then(() => emit('resumes:changed', store.resumes.get().items.map((r) => r.id))).catch(() => {});
   setTimeout(() => manager.resumeAll(), 4000);
   setInterval(followUpTick, 60 * 60 * 1000);
   setTimeout(followUpTick, 30000);

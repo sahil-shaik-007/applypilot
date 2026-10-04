@@ -60,6 +60,12 @@ async function fillCoverLetterText(page, frame, ctx) {
   return false;
 }
 
+
+function ghFormUrl(token, id, job) {
+  const host = job && job.atsMeta && job.atsMeta.region === 'eu' ? 'job-boards.eu.greenhouse.io' : 'job-boards.greenhouse.io';
+  return `https://${host}/embed/job_app?for=${encodeURIComponent(token)}&token=${encodeURIComponent(id)}`;
+}
+
 module.exports = {
   id: 'greenhouse',
   autoSubmit: true,
@@ -69,7 +75,9 @@ module.exports = {
   resolveUrl(job) {
     const url = job.applyUrl || job.url || '';
     const { token, id } = parseGh(url, job);
-    if (token && id) return `https://job-boards.greenhouse.io/${token}/jobs/${id}`;
+    // The embeddable form is served by Greenhouse itself and can't be redirected to a company's own
+    // careers site (job-boards.greenhouse.io/<board>/jobs/<id> often 302s away from the form).
+    if (token && id) return ghFormUrl(token, id, job);
     return url;
   },
   async prepare(page, ctx) {
@@ -78,7 +86,7 @@ module.exports = {
       const src = await page.locator('iframe#grnhse_iframe, iframe[src*="greenhouse.io"]').first().getAttribute('src', { timeout: 8000 }).catch(() => null);
       if (src) {
         const { token, id } = parseGh(src, ctx.job);
-        const target = token && id ? `https://job-boards.greenhouse.io/${token}/jobs/${id}` : src;
+        const target = token && id ? ghFormUrl(token, id, ctx.job) : src;
         ctx.emit('step', 'Opening the Greenhouse-hosted application form');
         await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
       }

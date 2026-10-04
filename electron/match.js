@@ -22,9 +22,23 @@ const SKILLS = [
   'figma', 'sketch', 'adobe xd', 'photoshop', 'illustrator', 'ux', 'ui', 'user research', 'prototyping', 'product management', 'roadmap', 'agile', 'scrum', 'jira', 'confluence', 'kanban', 'stakeholder management', 'seo', 'sem', 'google analytics', 'salesforce', 'hubspot', 'crm', 'sap', 'erp', 'oracle', 'financial modeling', 'accounting', 'tally', 'gst', 'quickbooks', 'copywriting', 'content marketing', 'social media', 'email marketing', 'b2b', 'saas', 'sales', 'customer success', 'recruiting', 'operations', 'supply chain', 'project management', 'pmp', 'six sigma', 'communication', 'leadership',
   // misc eng
   'system design', 'distributed systems', 'data structures', 'algorithms', 'oop', 'design patterns', 'blockchain', 'web3', 'embedded', 'iot', 'fpga', 'verilog', 'unity', 'unreal', 'opencv', 'cybersecurity', 'penetration testing', 'soc', 'siem',
+  // office & analysis (every domain)
+  'ms office', 'microsoft office', 'powerpoint', 'ms word', 'google sheets', 'vlookup', 'pivot tables', 'data analysis', 'data visualization', 'data entry', 'reporting', 'mis', 'documentation', 'research',
+  // finance & accounting
+  'financial analysis', 'financial reporting', 'budgeting', 'forecasting', 'accounts payable', 'accounts receivable', 'bookkeeping', 'auditing', 'internal audit', 'taxation', 'income tax', 'tds', 'ifrs', 'gaap', 'reconciliation', 'bank reconciliation', 'payroll', 'invoicing', 'cost accounting', 'treasury', 'credit analysis', 'risk management', 'compliance', 'kyc', 'aml', 'zoho books', 'sap fico', 'tally erp', 'valuation', 'equity research', 'investment banking',
+  // HR
+  'recruitment', 'talent acquisition', 'sourcing', 'onboarding', 'employee relations', 'performance management', 'hris', 'compensation', 'benefits', 'labour law', 'training and development', 'hr operations',
+  // sales, marketing, support
+  'lead generation', 'business development', 'negotiation', 'account management', 'key account management', 'cold calling', 'inside sales', 'b2c', 'channel sales', 'digital marketing', 'google ads', 'facebook ads', 'meta ads', 'performance marketing', 'marketing automation', 'content writing', 'market research', 'brand management', 'public relations', 'event management', 'customer service', 'customer support', 'call center', 'zendesk', 'freshdesk', 'client relationship',
+  // operations & supply chain
+  'inventory management', 'logistics', 'procurement', 'purchasing', 'vendor management', 'warehouse management', 'process improvement', 'lean', 'kaizen', 'quality control', 'quality assurance', 'iso 9001', 'production planning', 'erp', 'sap mm', 'sap sd', 'demand planning',
+  // mechanical / civil / electrical engineering
+  'autocad', 'solidworks', 'catia', 'creo', 'ansys', 'revit', 'staad pro', 'etabs', 'primavera', 'ms project', 'plc', 'scada', 'hvac', 'cnc', 'gd&t', 'mechanical design', 'product design', 'manufacturing', 'maintenance', 'site supervision', 'estimation', 'quantity surveying', 'electrical design', 'matlab simulink', 'pcb design', 'labview',
+  // healthcare, pharma, education
+  'patient care', 'clinical research', 'pharmacovigilance', 'regulatory affairs', 'nursing', 'emr', 'medical coding', 'gmp', 'lab techniques', 'teaching', 'curriculum development', 'lesson planning', 'tutoring',
 ];
 
-const ALIASES = { golang: 'go', nodejs: 'node.js', nextjs: 'next.js', postgres: 'postgresql', 'google cloud': 'gcp', llms: 'llm' };
+const ALIASES = { golang: 'go', nodejs: 'node.js', nextjs: 'next.js', postgres: 'postgresql', 'google cloud': 'gcp', llms: 'llm', 'microsoft office': 'ms office', 'tally erp': 'tally', purchasing: 'procurement', 'customer support': 'customer service', 'talent acquisition': 'recruitment', 'meta ads': 'facebook ads' };
 const canon = (s) => ALIASES[s] || s;
 
 const DISPLAY = {
@@ -32,11 +46,11 @@ const DISPLAY = {
   graphql: 'GraphQL', 'github actions': 'GitHub Actions', 'ci/cd': 'CI/CD', pytorch: 'PyTorch', tensorflow: 'TensorFlow', 'scikit-learn': 'scikit-learn', fastapi: 'FastAPI',
   nestjs: 'NestJS', dynamodb: 'DynamoDB', bigquery: 'BigQuery', 'power bi': 'Power BI', ios: 'iOS', swiftui: 'SwiftUI', 'a/b testing': 'A/B testing', 'c++': 'C++', 'c#': 'C#',
   '.net': '.NET', 'asp.net': 'ASP.NET', 'objective-c': 'Objective-C', 'pl/sql': 'PL/SQL', pyspark: 'PySpark', 'hugging face': 'Hugging Face', langchain: 'LangChain', xgboost: 'XGBoost',
-  opencv: 'OpenCV', jquery: 'jQuery', 'spring boot': 'Spring Boot', 'react native': 'React Native', 'jetpack compose': 'Jetpack Compose', 'adobe xd': 'Adobe XD', hubspot: 'HubSpot',
+  opencv: 'OpenCV', 'ms office': 'MS Office', 'ms word': 'MS Word', 'powerpoint': 'PowerPoint', vlookup: 'VLOOKUP', 'autocad': 'AutoCAD', solidworks: 'SolidWorks', catia: 'CATIA', ansys: 'ANSYS', 'staad pro': 'STAAD Pro', etabs: 'ETABS', 'ms project': 'MS Project', 'gd&t': 'GD&T', 'iso 9001': 'ISO 9001', 'sap fico': 'SAP FICO', 'sap mm': 'SAP MM', 'sap sd': 'SAP SD', labview: 'LabVIEW', 'pcb design': 'PCB design', 'matlab simulink': 'MATLAB Simulink', 'zoho books': 'Zoho Books', 'google ads': 'Google Ads', 'facebook ads': 'Facebook Ads', jquery: 'jQuery', 'spring boot': 'Spring Boot', 'react native': 'React Native', 'jetpack compose': 'Jetpack Compose', 'adobe xd': 'Adobe XD', hubspot: 'HubSpot',
   quickbooks: 'QuickBooks', 'google analytics': 'Google Analytics', 'generative ai': 'Generative AI', mlops: 'MLOps', devops: 'DevOps', saas: 'SaaS', b2b: 'B2B', rabbitmq: 'RabbitMQ',
   elasticsearch: 'Elasticsearch', github: 'GitHub', 'web3': 'Web3', iam: 'IAM', ec2: 'EC2', s3: 'S3', llm: 'LLM', 'power bi ': 'Power BI',
 };
-const UPPER = new Set(['aws', 'gcp', 'sql', 'css', 'html', 'php', 'rest', 'grpc', 'etl', 'nlp', 'rag', 'llm', 'ux', 'ui', 'seo', 'sem', 'crm', 'sap', 'erp', 'gst', 'iot', 'sre', 'siem', 'soc', 'qa', 'pmp', 'oop', 'dbt', 'r', 'fpga']);
+const UPPER = new Set(['mis', 'tds', 'ifrs', 'gaap', 'kyc', 'aml', 'hris', 'b2c', 'erp', 'plc', 'scada', 'hvac', 'cnc', 'emr', 'gmp', 'aws', 'gcp', 'sql', 'css', 'html', 'php', 'rest', 'grpc', 'etl', 'nlp', 'rag', 'llm', 'ux', 'ui', 'seo', 'sem', 'crm', 'sap', 'erp', 'gst', 'iot', 'sre', 'siem', 'soc', 'qa', 'pmp', 'oop', 'dbt', 'r', 'fpga']);
 function displaySkill(s) {
   if (DISPLAY[s]) return DISPLAY[s];
   if (UPPER.has(s)) return s.toUpperCase();
@@ -81,7 +95,7 @@ function yearsRequired(desc) {
 const SENIOR = /\b(senior|sr\.?|staff|principal|lead|head|director|vp|architect)\b/i;
 const JUNIOR = /\b(intern|internship|junior|jr\.?|graduate|fresher|entry[- ]level|trainee|associate)\b/i;
 
-const SOFT = new Set(['communication', 'leadership', 'stakeholder management', 'operations']);
+const SOFT = new Set(['communication', 'leadership', 'stakeholder management', 'operations', 'research', 'documentation', 'reporting']);
 
 function ghostSignals(job) {
   const flags = [];

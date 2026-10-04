@@ -4,13 +4,64 @@ const path = require('path');
 const crypto = require('crypto');
 const { extractSkills, displaySkill } = require('./match');
 
+// Modern pdf.js text extraction that rebuilds spaces and line breaks from glyph positions.
+// Many resume builders (Canva, Word "Save as PDF", LaTeX) place each word separately with no
+// space characters, which older extractors glue together ("ProficientinPythonandSQL").
+async function pdfjsText(buf) {
+  const { pathToFileURL } = require('url');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')).href;
+  const task = pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, verbosity: 0 });
+  const doc = await task.promise;
+  const pages = [];
+  for (let n = 1; n <= Math.min(doc.numPages, 12); n++) {
+    const page = await doc.getPage(n);
+    const content = await page.getTextContent();
+    let out = '';
+    let prev = null;
+    for (const it of content.items) {
+      if (typeof it.str !== 'string') continue;
+      const [, , , , x, y] = it.transform;
+      const h = Math.abs(it.transform[3]) || it.height || 10;
+      if (prev) {
+        const sameLine = Math.abs(y - prev.y) < h * 0.5;
+        if (!sameLine) out += '\n';
+        else {
+          const gap = x - (prev.x + prev.w);
+          if (gap > h * 0.18 && !/\s$/.test(out) && !/^\s/.test(it.str)) out += ' ';
+        }
+      }
+      out += it.str;
+      if (it.hasEOL) out += '\n';
+      prev = { x, y, w: it.width || 0 };
+    }
+    pages.push(out);
+    page.cleanup();
+  }
+  await task.destroy();
+  return pages.join('\n\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function avgWordLength(t) {
+  const toks = (t || '').split(/\s+/).filter(Boolean);
+  return toks.length ? t.replace(/\s/g, '').length / toks.length : 0;
+}
+
 async function extractText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const buf = fs.readFileSync(filePath);
   if (ext === '.pdf') {
-    const pdf = require('pdf-parse/lib/pdf-parse.js');
-    const out = await pdf(buf);
-    return out.text || '';
+    let text = '';
+    try { text = await pdfjsText(buf); } catch (e) { console.warn("pdf.js extraction failed:", e.message); text = ""; }
+    // Fall back to the legacy parser if pdf.js produced nothing usable.
+    if (!text.trim() || avgWordLength(text) > 15) {
+      try {
+        const pdf = require('pdf-parse/lib/pdf-parse.js');
+        const legacy = (await pdf(buf)).text || '';
+        if (!text.trim() || avgWordLength(legacy) < avgWordLength(text)) text = legacy;
+      } catch { /* keep pdf.js result */ }
+    }
+    return text;
   }
   if (ext === '.docx') {
     const mammoth = require('mammoth');
@@ -65,6 +116,14 @@ function guessProfile(text) {
 }
 
 async function importResume(store, srcPath, meta = {}) {
+  const hash = crypto.createHash('sha1').update(fs.readFileSync(srcPath)).digest('hex');
+  const dup = store.resumes.get().items.find((r) => {
+    if (!r.hash) { try { r.hash = crypto.createHash('sha1').update(fs.readFileSync(r.path)).digest('hex'); } catch { return false; } }
+    return r.hash === hash;
+  });
+  if (dup) throw new Error(`"${path.basename(srcPath)}" is already uploaded as "${dup.name}".`);
+  const ext0 = path.extname(srcPath).toLowerCase();
+  if (!['.pdf', '.docx', '.txt', '.md', '.rtf'].includes(ext0)) throw new Error(`"${path.basename(srcPath)}" isn't a supported resume. Use PDF, DOCX or TXT.`);
   const id = crypto.randomUUID();
   const ext = path.extname(srcPath).toLowerCase();
   const fileName = path.basename(srcPath);
@@ -78,6 +137,8 @@ async function importResume(store, srcPath, meta = {}) {
     name: meta.name || fileName.replace(/\.[^.]+$/, ''),
     fileName,
     path: dest,
+    hash,
+    parserVersion: PARSER_VERSION,
     ext,
     size: fs.statSync(dest).size,
     text,
@@ -108,7 +169,11 @@ function deleteResume(store, id) {
 function pickResume(store, { resumeId, job } = {}) {
   const items = store.resumes.get().items;
   if (!items.length) return null;
-  if (resumeId && resumeId !== 'auto') return items.find((r) => r.id === resumeId) || null;
+  if (resumeId && resumeId !== 'auto') {
+    const chosen = items.find((r) => r.id === resumeId);
+    if (chosen) return chosen;
+    // The chosen resume was deleted: fall back to automatic selection instead of failing.
+  }
   if (job) {
     const title = (job.title || '').toLowerCase();
     const tagged = items.find((r) => (r.roles || []).some((role) => role && title.includes(role.toLowerCase())));
@@ -124,4 +189,27 @@ function pickResume(store, { resumeId, job } = {}) {
   return items.find((r) => r.isDefault) || items[0];
 }
 
-module.exports = { importResume, deleteResume, pickResume, extractText, guessProfile };
+const PARSER_VERSION = 2; // bump when text extraction improves so stored resumes get re-read
+
+// Re-extract a stored resume's text with the current parser (keeps name, roles, stats).
+async function reparseResume(store, id) {
+  const r = store.resumes.get().items.find((x) => x.id === id);
+  if (!r) throw new Error('Resume not found');
+  let text = '';
+  let parseError = null;
+  try { text = await extractText(r.path); } catch (e) { parseError = e.message; }
+  store.resumes.update((d) => {
+    const cur = d.items.find((x) => x.id === id);
+    if (cur) Object.assign(cur, { text, skills: extractSkills(text), parseError, parserVersion: PARSER_VERSION });
+  });
+  return store.resumes.get().items.find((x) => x.id === id);
+}
+
+// One-time upgrade of resumes parsed by an older extractor.
+async function migrateResumes(store) {
+  for (const r of store.resumes.get().items) {
+    if ((r.parserVersion || 1) < PARSER_VERSION) { try { await reparseResume(store, r.id); } catch { /* keep old text */ } }
+  }
+}
+
+module.exports = { importResume, deleteResume, pickResume, extractText, guessProfile, reparseResume, migrateResumes, PARSER_VERSION };

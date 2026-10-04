@@ -332,7 +332,7 @@ class ApplyEngine {
       } else if (assisted) {
         emit('needs-user', 'This site is assisted-only: review the pre-filled form and submit it yourself.', { unanswered: result.unanswered });
       } else {
-        emit('needs-user', 'Form filled — review it and click submit in the browser.', { unanswered: result.unanswered });
+        emit('needs-user', result.filledCount ? 'Form filled — review it and click submit in the browser.' : 'Could not find an application form to fill on this page — please apply in the browser tab that opened.', { unanswered: result.unanswered });
       }
 
       // ---------------- review / assisted: hand over to the user and watch -------------

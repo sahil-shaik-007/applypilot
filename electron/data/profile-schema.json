@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "personal",
+      "title": "Personal details",
+      "icon": "user",
+      "description": "Used on every application form.",
+      "fields": [
+        { "key": "firstName", "label": "First name", "type": "text", "required": true },
+        { "key": "middleName", "label": "Middle name", "type": "text" },
+        { "key": "lastName", "label": "Last name", "type": "text", "required": true },
+        { "key": "preferredName", "label": "Preferred name", "type": "text" },
+        { "key": "email", "label": "Email", "type": "email", "required": true },
+        { "key": "phoneCountryCode", "label": "Phone country code", "type": "text", "placeholder": "+91" },
+        { "key": "phone", "label": "Phone number", "type": "tel", "required": true },
+        { "key": "dateOfBirth", "label": "Date of birth", "type": "date", "help": "Only filled when a form explicitly asks." },
+        { "key": "nationality", "label": "Nationality", "type": "text" }
+      ]
+    },
+    {
+      "id": "address",
+      "title": "Address & location",
+      "icon": "map-pin",
+      "fields": [
+        { "key": "addressLine1", "label": "Street address", "type": "text" },
+        { "key": "addressLine2", "label": "Address line 2", "type": "text" },
+        { "key": "city", "label": "City", "type": "text", "required": true },
+        { "key": "state", "label": "State / Province", "type": "text" },
+        { "key": "postalCode", "label": "Postal / ZIP code", "type": "text" },
+        { "key": "country", "label": "Country", "type": "text", "required": true },
+        { "key": "timezone", "label": "Time zone", "type": "text", "placeholder": "Asia/Kolkata" }
+      ]
+    },
+    {
+      "id": "links",
+      "title": "Online presence",
+      "icon": "link",
+      "fields": [
+        { "key": "linkedin", "label": "LinkedIn URL", "type": "url", "placeholder": "https://linkedin.com/in/…" },
+        { "key": "github", "label": "GitHub URL", "type": "url" },
+        { "key": "portfolio", "label": "Portfolio URL", "type": "url" },
+        { "key": "website", "label": "Personal website", "type": "url" },
+        { "key": "twitter", "label": "X / Twitter URL", "type": "url" },
+        { "key": "leetcode", "label": "LeetCode / HackerRank URL", "type": "url" },
+        { "key": "dribbble", "label": "Dribbble / Behance URL", "type": "url" },
+        { "key": "otherLink", "label": "Other link", "type": "url" }
+      ]
+    },
+    {
+      "id": "authorization",
+      "title": "Work authorization",
+      "icon": "shield-check",
+      "description": "Screening questions about visas & sponsorship are answered from here.",
+      "fields": [
+        { "key": "authorizedCountries", "label": "Countries you can legally work in", "type": "tags", "placeholder": "India, United States…" },
+        { "key": "needsSponsorship", "label": "Will you now or in future require visa sponsorship?", "type": "yesno" },
+        { "key": "workAuthUS", "label": "US work status", "type": "select", "options": ["Not applicable", "US Citizen", "Green Card holder", "H-1B", "F-1 OPT / STEM OPT", "TN / L-1 / other visa", "Need sponsorship"] },
+        { "key": "workAuthUK", "label": "UK work status", "type": "select", "options": ["Not applicable", "British / Irish citizen", "Settled / pre-settled status", "Skilled Worker visa", "Graduate visa", "Need sponsorship"] },
+        { "key": "workAuthEU", "label": "EU work status", "type": "select", "options": ["Not applicable", "EU citizen", "Blue Card / work permit", "Need sponsorship"] },
+        { "key": "workAuthCanada", "label": "Canada work status", "type": "select", "options": ["Not applicable", "Citizen / PR", "Open work permit", "Need sponsorship"] },
+        { "key": "visaDetails", "label": "Visa details (free text)", "type": "text" },
+        { "key": "willingToRelocate", "label": "Willing to relocate?", "type": "yesno" },
+        { "key": "securityClearance", "label": "Security clearance", "type": "text", "placeholder": "None" },
+        { "key": "over18", "label": "Are you 18 or older?", "type": "yesno", "default": "Yes" },
+        { "key": "backgroundCheckOk", "label": "Consent to background check?", "type": "yesno", "default": "Yes" },
+        { "key": "drugTestOk", "label": "Consent to drug test?", "type": "yesno", "default": "Yes" },
+        { "key": "hasDriversLicense", "label": "Valid driver's license?", "type": "yesno" }
+      ]
+    },
+    {
+      "id": "preferences",
+      "title": "Job preferences",
+      "icon": "target",
+      "fields": [
+        { "key": "desiredTitles", "label": "Target job titles", "type": "tags", "required": true, "placeholder": "Software Engineer, Backend Developer…" },
+        { "key": "jobTypes", "label": "Job types", "type": "multiselect", "options": ["Full-time", "Part-time", "Contract", "Internship", "Freelance", "Temporary"] },
+        { "key": "workModes", "label": "Work mode", "type": "multiselect", "options": ["Remote", "Hybrid", "On-site"] },
+        { "key": "preferredLocations", "label": "Preferred locations", "type": "tags", "placeholder": "Bengaluru, Hyderabad, Remote…" },
+        { "key": "salaryCurrency", "label": "Salary currency", "type": "select", "options": ["INR", "USD", "EUR", "GBP", "CAD", "AUD", "SGD", "AED"] },
+        { "key": "salaryPeriod", "label": "Salary period", "type": "select", "options": ["Yearly", "Monthly", "Hourly"] },
+        { "key": "currentSalary", "label": "Current salary / CTC", "type": "number" },
+        { "key": "expectedSalaryMin", "label": "Expected salary (min)", "type": "number" },
+        { "key": "expectedSalaryMax", "label": "Expected salary (max)", "type": "number" },
+        { "key": "noticePeriodDays", "label": "Notice period (days)", "type": "number", "placeholder": "30" },
+        { "key": "availableFrom", "label": "Earliest start date", "type": "date" },
+        { "key": "travelPercent", "label": "Willing to travel (%)", "type": "number", "placeholder": "25" },
+        { "key": "industries", "label": "Preferred industries", "type": "tags" },
+        { "key": "companySizes", "label": "Company size", "type": "multiselect", "options": ["Startup (1-50)", "Scale-up (51-500)", "Mid-size (501-5000)", "Enterprise (5000+)"] },
+        { "key": "excludeCompanies", "label": "Never apply to these companies", "type": "tags", "help": "e.g. your current employer." },
+        { "key": "excludeKeywords", "label": "Skip jobs containing", "type": "tags", "placeholder": "clearance, unpaid, commission only…" }
+      ]
+    },
+    {
+      "id": "experience",
+      "title": "Experience summary",
+      "icon": "briefcase",
+      "fields": [
+        { "key": "headline", "label": "Professional headline", "type": "text", "placeholder": "Full-stack engineer · 5 yrs · React/Node/AWS" },
+        { "key": "currentTitle", "label": "Current / last title", "type": "text" },
+        { "key": "currentCompany", "label": "Current / last company", "type": "text" },
+        { "key": "totalYearsExperience", "label": "Total years of experience", "type": "number", "required": true },
+        { "key": "seniority", "label": "Seniority", "type": "select", "options": ["Intern", "Entry level / Fresher", "Junior", "Mid-level", "Senior", "Lead / Staff", "Principal", "Manager", "Director", "VP / Executive"] },
+        { "key": "summary", "label": "Professional summary", "type": "textarea", "rows": 5 },
+        { "key": "skills", "label": "Key skills", "type": "tags", "required": true, "help": "Used for match scoring and skill-specific screening questions." },
+        { "key": "skillYears", "label": "Years per skill", "type": "textarea", "rows": 3, "placeholder": "Python: 5\nReact: 3\nAWS: 2", "help": "One per line, 'Skill: years' — answers 'How many years of X?' questions." },
+        { "key": "languages", "label": "Languages spoken", "type": "tags", "placeholder": "English (Fluent), Hindi (Native)…" }
+      ]
+    },
+    {
+      "id": "workHistory",
+      "title": "Work history",
+      "icon": "building",
+      "repeat": true,
+      "itemLabel": "Position",
+      "fields": [
+        { "key": "company", "label": "Company", "type": "text" },
+        { "key": "title", "label": "Title", "type": "text" },
+        { "key": "location", "label": "Location", "type": "text" },
+        { "key": "startDate", "label": "Start date", "type": "month" },
+        { "key": "endDate", "label": "End date", "type": "month" },
+        { "key": "current", "label": "I currently work here", "type": "checkbox" },
+        { "key": "description", "label": "Responsibilities & achievements", "type": "textarea", "rows": 4 }
+      ]
+    },
+    {
+      "id": "education",
+      "title": "Education",
+      "icon": "graduation-cap",
+      "repeat": true,
+      "itemLabel": "Degree",
+      "fields": [
+        { "key": "school", "label": "School / University", "type": "text" },
+        { "key": "degree", "label": "Degree", "type": "select", "options": ["High School", "Diploma", "Associate", "Bachelor's", "Master's", "MBA", "PhD", "Other"] },
+        { "key": "field", "label": "Field of study", "type": "text" },
+        { "key": "startDate", "label": "Start", "type": "month" },
+        { "key": "endDate", "label": "End (or expected)", "type": "month" },
+        { "key": "gpa", "label": "GPA / Percentage", "type": "text" }
+      ]
+    },
+    {
+      "id": "certifications",
+      "title": "Certifications",
+      "icon": "award",
+      "repeat": true,
+      "itemLabel": "Certification",
+      "fields": [
+        { "key": "name", "label": "Name", "type": "text" },
+        { "key": "issuer", "label": "Issuer", "type": "text" },
+        { "key": "date", "label": "Date", "type": "month" },
+        { "key": "url", "label": "Credential URL", "type": "url" }
+      ]
+    },
+    {
+      "id": "projects",
+      "title": "Projects",
+      "icon": "folder-git",
+      "repeat": true,
+      "itemLabel": "Project",
+      "fields": [
+        { "key": "name", "label": "Name", "type": "text" },
+        { "key": "url", "label": "URL", "type": "url" },
+        { "key": "description", "label": "Description", "type": "textarea", "rows": 3 }
+      ]
+    },
+    {
+      "id": "references",
+      "title": "References",
+      "icon": "users",
+      "repeat": true,
+      "itemLabel": "Reference",
+      "fields": [
+        { "key": "name", "label": "Name", "type": "text" },
+        { "key": "relationship", "label": "Relationship", "type": "text" },
+        { "key": "email", "label": "Email", "type": "email" },
+        { "key": "phone", "label": "Phone", "type": "tel" }
+      ]
+    },
+    {
+      "id": "eeo",
+      "title": "Voluntary self-identification",
+      "icon": "heart-handshake",
+      "description": "Optional US/UK equal-opportunity questions. Defaults to 'Decline to self-identify'.",
+      "fields": [
+        { "key": "gender", "label": "Gender", "type": "select", "options": ["Decline to self-identify", "Male", "Female", "Non-binary"], "default": "Decline to self-identify" },
+        { "key": "pronouns", "label": "Pronouns", "type": "select", "options": ["Decline to self-identify", "He/him", "She/her", "They/them"], "default": "Decline to self-identify" },
+        { "key": "hispanicLatino", "label": "Hispanic or Latino?", "type": "select", "options": ["Decline to self-identify", "Yes", "No"], "default": "Decline to self-identify" },
+        { "key": "race", "label": "Race / ethnicity", "type": "select", "options": ["Decline to self-identify", "Asian", "Black or African American", "White", "Hispanic or Latino", "Native American or Alaska Native", "Native Hawaiian or Pacific Islander", "Two or more races"], "default": "Decline to self-identify" },
+        { "key": "veteranStatus", "label": "Veteran status", "type": "select", "options": ["Decline to self-identify", "I am not a protected veteran", "I am a protected veteran"], "default": "Decline to self-identify" },
+        { "key": "disabilityStatus", "label": "Disability status", "type": "select", "options": ["Decline to self-identify", "No, I do not have a disability", "Yes, I have a disability"], "default": "Decline to self-identify" }
+      ]
+    },
+    {
+      "id": "application",
+      "title": "Application defaults",
+      "icon": "file-text",
+      "fields": [
+        { "key": "howDidYouHear", "label": "Default answer to 'How did you hear about us?'", "type": "text", "default": "Company website" },
+        { "key": "coverLetterTemplate", "label": "Cover letter template", "type": "textarea", "rows": 8, "placeholder": "Dear {company} team,\n\nI'm excited to apply for the {title} role…", "help": "Placeholders: {company} {title} {firstName} {lastName} {skills} {years}. AI can personalise it if a Claude API key is set." },
+        { "key": "whyInterested", "label": "Generic 'Why are you interested?' answer", "type": "textarea", "rows": 3 },
+        { "key": "additionalInfo", "label": "Anything else recruiters should know", "type": "textarea", "rows": 3 },
+        { "key": "previouslyEmployedHere", "label": "Default: previously worked at the company?", "type": "yesno", "default": "No" },
+        { "key": "hasNonCompete", "label": "Bound by a non-compete?", "type": "yesno", "default": "No" }
+      ]
+    }
+  ]
+}

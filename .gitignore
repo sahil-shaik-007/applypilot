@@ -1,0 +1,21 @@
+# dependencies & build output
+node_modules/
+dist/
+release/
+.vite/
+
+# SECRETS — the license signing key must never be committed
+keys/
+*.pem
+!electron/license-public.pem
+.env
+.env.*
+
+# logs, caches, local test data
+*.log
+*.corrupt-*
+.claude/
+scratch/
+tmp/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,16 @@
+ApplyPilot — Proprietary Software License
+
+Copyright (c) 2026 sahil-shaik-007. All rights reserved.
+
+This repository and the software it contains are proprietary. No part of it may
+be copied, modified, distributed, sublicensed, sold, or used to create derivative
+works without the prior written permission of the copyright holder, except as
+expressly granted by a paid or free license issued through the official ApplyPilot
+distribution channels (see docs/TERMS.md).
+
+The software is provided "as is", without warranty of any kind, express or implied.
+In no event shall the copyright holder be liable for any claim, damages or other
+liability arising from the use of the software.
+
+Third-party components are used under their own licenses (see package.json and
+package-lock.json).

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Search, Rocket, Inbox, SquareKanban, FileText, UserRound, MessageSquareText, Globe, Wand2, Settings as SettingsIcon, Star, Crown, Loader2,
 } from 'lucide-react';
 import { useApp } from './lib/store';
-import { Toasts } from './components/ui';
+import { Toasts, ConfirmDialog } from './components/ui';
 import Dashboard from './pages/Dashboard';
 import Jobs from './pages/Jobs';
 import Campaigns from './pages/Campaigns';
@@ -39,7 +39,7 @@ export default function App() {
   const app = useApp();
   if (app.error) return <div className="page"><h1>Something went wrong</h1><p className="muted">{app.error}</p></div>;
   if (!app.ready) return <div style={{ display: 'grid', placeItems: 'center', height: '100vh' }}><Loader2 className="spin" /></div>;
-  if (!app.settings.onboarded) return <><div className="titlebar" /><Onboarding /><Toasts toasts={app.toasts} /></>;
+  if (!app.settings.onboarded) return <><div className="titlebar" /><Onboarding /><Toasts toasts={app.toasts} /><ConfirmDialog state={app.confirmState} onClose={app.closeConfirm} /></>;
 
   const current = NAV.find((n) => n.id === app.route.page) || NAV[1];
   const Page = current.el;
@@ -87,6 +87,7 @@ export default function App() {
         </AnimatePresence>
       </main>
       <Toasts toasts={app.toasts} />
+      <ConfirmDialog state={app.confirmState} onClose={app.closeConfirm} />
     </div>
   );
 }

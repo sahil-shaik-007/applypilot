@@ -280,3 +280,14 @@ export function CountUp({ value = 0, duration = 700 }) {
   }, [value, duration]);
   return <>{n.toLocaleString()}</>;
 }
+
+export function ConfirmDialog({ state, onClose }) {
+  return (
+    <Modal open={!!state} onClose={() => onClose(false)} title={state ? state.title || 'Are you sure?' : ''} footer={state && <>
+      <Button variant="ghost" onClick={() => onClose(false)}>Cancel</Button>
+      <Button variant={state.danger === false ? 'primary' : 'danger'} autoFocus onClick={() => onClose(true)}>{state.confirmLabel || 'Delete'}</Button>
+    </>}>
+      {state && <p className="muted" style={{ margin: 0, lineHeight: 1.6 }}>{state.message}</p>}
+    </Modal>
+  );
+}

@@ -21,6 +21,7 @@ export function AppProvider({ children }) {
   const [error, setError] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [route, setRoute] = useState({ page: 'dashboard', params: {} });
+  const [confirmState, setConfirmState] = useState(null);
   const searchProgress = useRef(new Set());
   const [, force] = useState(0);
 
@@ -48,8 +49,17 @@ export function AppProvider({ children }) {
         default: return s;
       }
     });
+    if (channel === 'resumes:changed') api.call('resumes:list').then((resumes) => setState((s) => ({ ...s, resumes })));
     if (channel === 'qa:pending') api.call('qa:list').then((qa) => setState((s) => ({ ...s, qa })));
   }), []);
+
+  // In-app replacement for window.confirm: await app.confirm({ title, message, confirmLabel, danger })
+  const confirm = useCallback((opts) => new Promise((resolve) => {
+    setConfirmState({ ...(typeof opts === 'string' ? { message: opts } : opts), resolve });
+  }), []);
+  const closeConfirm = useCallback((answer) => {
+    setConfirmState((c) => { if (c) c.resolve(answer); return null; });
+  }, []);
 
   const set = useCallback((patch) => setState((s) => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) })), []);
   const go = useCallback((page, params = {}) => setRoute({ page, params }), []);
@@ -67,8 +77,8 @@ export function AppProvider({ children }) {
     }
   }, [toast]);
 
-  const value = useMemo(() => ({ ...(state || {}), ready: !!state, error, set, reload, toast, toasts, route, go, run, onSearchProgress, force: () => force((n) => n + 1) }),
-    [state, error, set, reload, toast, toasts, route, go, run, onSearchProgress]);
+  const value = useMemo(() => ({ ...(state || {}), ready: !!state, error, set, reload, toast, toasts, route, go, run, onSearchProgress, confirm, confirmState, closeConfirm, force: () => force((n) => n + 1) }),
+    [state, error, set, reload, toast, toasts, route, go, run, onSearchProgress, confirm, confirmState, closeConfirm]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

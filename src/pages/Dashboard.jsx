@@ -181,7 +181,9 @@ export default function Dashboard() {
           </motion.div>
 
           <motion.div {...stagger(6)} className="card pad">
-            <div className="section-title"><Activity size={14} />Live activity</div>
+            <div className="row between"><div className="section-title" style={{ margin: 0 }}><Activity size={14} />Live activity</div>
+              {app.activity.length > 0 && <a href="#" className="small muted" onClick={async (e) => { e.preventDefault(); await app.run('activity:clear'); app.set({ activity: [] }); }}>Clear</a>}</div>
+            <div style={{ height: 10 }} />
             <div className="col" style={{ gap: 2, maxHeight: 460, overflowY: 'auto' }}>
               <AnimatePresence initial={false}>
                 {app.activity.slice(0, 40).map((a) => (

@@ -41,7 +41,7 @@ export function FieldInput({ f, value, onChange }) {
     );
     case 'multiselect': return <MultiChips value={value || []} options={f.options} onChange={onChange} />;
     case 'tags': return <TagInput value={value || []} onChange={onChange} placeholder={f.placeholder} />;
-    case 'yesno': return <Seg value={value || ''} onChange={onChange} options={['Yes', 'No']} />;
+    case 'yesno': return <Seg value={value || ''} onChange={(v) => onChange(v === value ? '' : v)} options={['Yes', 'No']} />; // click again to clear
     case 'checkbox': return <div style={{ paddingTop: 6 }}><Switch on={!!value} onChange={onChange} /></div>;
     case 'number': return <input className="input" type="number" value={value ?? ''} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} />;
     default: return <input className="input" type={f.type === 'month' ? 'month' : f.type === 'date' ? 'date' : f.type === 'email' ? 'email' : 'text'} value={value || ''} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />;

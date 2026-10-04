@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Star, ArrowRight, ArrowLeft, Rocket, ShieldCheck, Zap, FileText, Globe, Sparkles, Check } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Field, TagInput, MultiChips, Seg } from '../components/ui';
-import { Dropzone, mergeProfile } from './Resumes';
+import { Dropzone, ResumeChips, mergeProfile } from './Resumes';
 import { withDefaults } from './Profile';
 
 const STEPS = ['Welcome', 'Resume', 'About you', 'What you want', 'Launch'];
@@ -13,7 +13,6 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1);
   const [v, setV] = useState(() => withDefaults(app.profileSchema, app.profile.values));
-  const [trial, setTrial] = useState(!app.plan.licensed && !app.plan.trialUsed);
   const [busy, setBusy] = useState(false);
   const up = (k) => (val) => setV((x) => ({ ...x, [k]: val }));
   const go = (n) => { setDir(n > step ? 1 : -1); setStep(n); };
@@ -33,7 +32,6 @@ export default function Onboarding() {
         const c = await app.run('campaigns:save', [{ name: v.desiredTitles[0], roles: v.desiredTitles.slice(0, 3), locations: (v.preferredLocations || []).slice(0, 3), remote: (v.workModes || []).length === 1 && v.workModes[0] === 'Remote' ? 'remote' : 'any', mode: 'queue', color: '#6366f1' }]);
         app.set((s) => ({ campaigns: [...s.campaigns.filter((x) => x.id !== c.id), c] }));
       }
-      if (trial) app.set({ plan: await app.run('license:startTrial') });
       app.set({ settings: await app.run('settings:update', [{ onboarded: true }]) });
       app.go('dashboard');
       app.toast('You\'re all set — your first campaign is ready to start 🚀', 'success');
@@ -84,7 +82,7 @@ export default function Onboarding() {
                 <h2 style={{ fontSize: 30, margin: '0 0 8px' }}>Upload your resume</h2>
                 <p className="muted" style={{ marginTop: 0 }}>We'll read it and pre-fill your profile. You can add more versions (e.g. one for "Data Analyst", one for "BI Developer") anytime.</p>
                 <Dropzone onDone={(results) => setV((cur) => results.reduce((acc, r) => mergeProfile(acc, r.guessed), cur))} />
-                {app.resumes.length > 0 && <div className="chips" style={{ marginTop: 14 }}>{app.resumes.map((r) => <span key={r.id} className="badge green"><Check size={11} />{r.fileName}</span>)}</div>}
+                <ResumeChips />
               </div>
             )}
 
@@ -102,7 +100,8 @@ export default function Onboarding() {
                   <Field label="City" required><input className="input" value={v.city || ''} onChange={(e) => up('city')(e.target.value)} /></Field>
                   <Field label="Country" required><input className="input" value={v.country || ''} onChange={(e) => up('country')(e.target.value)} /></Field>
                   <Field label="LinkedIn URL"><input className="input" value={v.linkedin || ''} onChange={(e) => up('linkedin')(e.target.value)} /></Field>
-                  <Field label="GitHub / portfolio"><input className="input" value={v.github || v.portfolio || ''} onChange={(e) => up(v.github ? 'github' : 'portfolio')(e.target.value)} /></Field>
+                  <Field label="GitHub"><input className="input" value={v.github || ''} onChange={(e) => up('github')(e.target.value)} /></Field>
+                  <Field label="Portfolio / website"><input className="input" value={v.portfolio || ''} onChange={(e) => up('portfolio')(e.target.value)} /></Field>
                 </div>
               </div>
             )}
@@ -136,10 +135,9 @@ export default function Onboarding() {
                 <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: [20, -8, 0], opacity: 1 }} transition={{ duration: 0.8 }}><Rocket size={48} color="var(--accent-2)" /></motion.div>
                 <h2 style={{ fontSize: 34, margin: '16px 0 8px' }}>Ready for launch</h2>
                 <p className="muted" style={{ maxWidth: 540, margin: '0 auto' }}>We'll create a campaign for <b style={{ color: 'var(--fg)' }}>{(v.desiredTitles || []).slice(0, 3).join(', ')}</b> in safe "Review queue" mode. Start it from the Campaigns tab whenever you like.</p>
-                {!app.plan.licensed && !app.plan.trialUsed && (
-                  <div className="card pad premium premium-shimmer row between" style={{ marginTop: 26, textAlign: 'left' }}>
-                    <div style={{ position: 'relative', zIndex: 2 }}><div style={{ fontWeight: 700 }}><Sparkles size={15} style={{ verticalAlign: -2 }} /> Start a free 7-day Pro trial</div><div className="small muted">10 parallel campaigns, full autopilot, unlimited AI. No card needed.</div></div>
-                    <input type="checkbox" checked={trial} onChange={(e) => setTrial(e.target.checked)} style={{ width: 20, height: 20, accentColor: 'var(--accent)', position: 'relative', zIndex: 2 }} />
+                {app.plan.plan === 'trial' && (
+                  <div className="card pad premium premium-shimmer" style={{ marginTop: 26, textAlign: 'left' }}>
+                    <div style={{ position: 'relative', zIndex: 2 }}><div style={{ fontWeight: 700 }}><Sparkles size={15} style={{ verticalAlign: -2 }} /> Your free 7-day Pro trial is active</div><div className="small muted">{app.plan.trialDaysLeft} days of 10 parallel campaigns, full autopilot and unlimited AI. No card needed — you'll drop to Free afterwards unless you upgrade.</div></div>
                   </div>
                 )}
                 <Button variant="gradient" className="btn-gradient" size="lg" style={{ marginTop: 28 }} loading={busy} onClick={finish}>Open my dashboard <ArrowRight size={16} /></Button>

@@ -11,7 +11,10 @@ export default function ReviewQueue() {
   const [mode, setMode] = useState(app.plan.autoSubmit ? 'auto' : 'review');
   const [open, setOpen] = useState(null);
   const needs = app.applications.filter((a) => a.status === 'awaiting-you');
-  const queued = useMemo(() => app.applications.filter((a) => a.status === 'queued').sort((a, b) => (b.score || 0) - (a.score || 0)), [app.applications]);
+  const [camp, setCamp] = useState('all');
+  const [limit, setLimit] = useState(100);
+  const queued = useMemo(() => app.applications.filter((a) => a.status === 'queued' && (camp === 'all' || a.campaignId === camp)).sort((a, b) => (b.score || 0) - (a.score || 0)), [app.applications, camp]);
+  const queuedCampaigns = useMemo(() => [...new Set(app.applications.filter((a) => a.status === 'queued').map((a) => a.campaignId))].map((id) => app.campaigns.find((c) => c.id === id) || { id, name: 'Manual' }), [app.applications, app.campaigns]);
   const pendingQ = app.qa.filter((q) => !q.answer).length;
 
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -49,10 +52,11 @@ export default function ReviewQueue() {
                     <div style={{ fontWeight: 700 }} className="ellipsis">{a.job.title} <span className="muted" style={{ fontWeight: 400 }}>· {a.job.company}</span></div>
                     <div className="small muted ellipsis">{(a.events || []).slice(-1)[0]?.message || 'Review and submit'}{a.unanswered && a.unanswered.length ? ` · ${a.unanswered.length} unanswered question(s)` : ''}</div>
                   </div>
+                  {a.unanswered && a.unanswered.length > 0 && <Button size="sm" variant="ghost" icon={MessageSquareText} onClick={() => app.go('qa')}>Answer</Button>}
                   <Button size="sm" icon={ExternalLink} onClick={() => app.run('browser:open', [a.job.applyUrl || a.job.url])}>Open & finish</Button>
                   <Button size="sm" icon={RotateCw} onClick={() => approve([a.id])}>Retry</Button>
                   <Button size="sm" variant="primary" icon={Check} onClick={() => mark(a.id, 'applied')}>I submitted it</Button>
-                  <Button size="sm" variant="ghost" icon={X} onClick={() => mark(a.id, 'skipped')} />
+                  <Button size="sm" variant="ghost" icon={X} title="Skip this job" onClick={() => mark(a.id, 'skipped')} />
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -63,10 +67,16 @@ export default function ReviewQueue() {
       <section>
         <div className="row between" style={{ marginBottom: 12 }}>
           <div className="section-title" style={{ margin: 0 }}><Inbox size={14} />Ready for approval ({queued.length})</div>
-          {queued.length > 0 && (
+          {(queued.length > 0 || camp !== 'all') && (
             <div className="row">
+              {queuedCampaigns.length > 1 && (
+                <select className="select" style={{ width: 190, height: 32 }} value={camp} onChange={(e) => { setCamp(e.target.value); setSel(new Set()); }}>
+                  <option value="all">All campaigns</option>
+                  {queuedCampaigns.map((c) => <option key={c.id || 'manual'} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
               <Seg value={mode} onChange={setMode} options={[{ value: 'review', label: 'Fill, I submit' }, { value: 'auto', label: 'Autopilot' }]} />
-              <Button size="sm" variant="ghost" onClick={() => setSel(sel.size === queued.length ? new Set() : new Set(queued.map((a) => a.id)))}>{sel.size === queued.length ? 'Clear' : 'Select all'}</Button>
+              <Button size="sm" variant="ghost" onClick={() => { const vis = queued.slice(0, limit); setSel(sel.size === vis.length ? new Set() : new Set(vis.map((a) => a.id))); }}>{sel.size && sel.size === Math.min(limit, queued.length) ? 'Clear' : 'Select all'}</Button>
               <Button size="sm" icon={X} disabled={!sel.size} onClick={() => skip([...sel])}>Skip</Button>
               <Button size="sm" variant="primary" icon={Send} disabled={!sel.size} onClick={() => approve([...sel])}>Apply to {sel.size || ''} selected</Button>
             </div>
@@ -78,7 +88,7 @@ export default function ReviewQueue() {
               <thead><tr><th style={{ width: 36 }} /><th>Match</th><th>Role</th><th>Salary</th><th>Campaign</th><th>Resume</th><th>Found</th><th /></tr></thead>
               <tbody>
                 <AnimatePresence>
-                  {queued.map((a) => (
+                  {queued.slice(0, limit).map((a) => (
                     <motion.tr key={a.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                       <td><input type="checkbox" checked={sel.has(a.id)} onChange={() => toggle(a.id)} style={{ accentColor: 'var(--accent)', width: 16, height: 16 }} /></td>
                       <td><ScoreRing score={a.score || 0} size={38} stroke={3.5} /></td>
@@ -94,12 +104,13 @@ export default function ReviewQueue() {
                         </select>
                       </td>
                       <td className="small dim">{timeAgo(a.createdAt)}</td>
-                      <td><div className="row" style={{ gap: 2 }}><Button size="sm" variant="ghost" icon={X} onClick={() => skip([a.id])} /><Button size="sm" icon={Send} onClick={() => approve([a.id])} /></div></td>
+                      <td><div className="row" style={{ gap: 2 }}><Button size="sm" variant="ghost" icon={X} title="Skip" onClick={() => skip([a.id])} /><Button size="sm" icon={Send} title="Apply to this job" onClick={() => approve([a.id])} /></div></td>
                     </motion.tr>
                   ))}
                 </AnimatePresence>
               </tbody>
             </table>
+            {queued.length > limit && <div style={{ textAlign: 'center', padding: 12 }}><Button size="sm" onClick={() => setLimit(limit + 100)}>Show more ({queued.length - limit} left)</Button></div>}
           </div>
         ) : (
           <Empty icon={Inbox} title="Queue is empty" action={<Button variant="primary" onClick={() => app.go('campaigns')}>Go to campaigns</Button>}>

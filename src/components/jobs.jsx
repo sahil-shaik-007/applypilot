@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Clock, ExternalLink, Bookmark, Send, Wand2, Zap, Sparkles, Copy, FileText, MessageSquareText, GraduationCap, ShieldCheck, CircleAlert } from 'lucide-react';
+import { MapPin, Clock, ExternalLink, Bookmark, BookmarkX, Send, Wand2, Zap, Sparkles, Copy, FileText, MessageSquareText, GraduationCap, ShieldCheck, CircleAlert } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, ScoreRing, StatusBadge, Markdown, Seg, timeAgo, salary, stagger } from './ui';
 
@@ -96,6 +96,10 @@ export function JobDrawer({ job, onClose }) {
             <Seg value={tab} onChange={setTab} options={[{ value: 'details', label: 'Details' }, { value: 'apply', label: 'Apply' }, { value: 'ai', label: 'AI tools' }]} />
             <Button size="sm" icon={ExternalLink} onClick={() => app.run('shell:open', [job.url || job.applyUrl])}>Open posting</Button>
             {!application && <Button size="sm" icon={Bookmark} loading={busy === 'save'} onClick={save}>Save</Button>}
+            {application && ['saved', 'skipped'].includes(application.status) && <Button size="sm" variant="ghost" icon={BookmarkX} onClick={async () => {
+              await app.run('applications:delete', [application.id], 'Removed from your tracker');
+              app.set((s) => ({ applications: s.applications.filter((x) => x.id !== application.id) }));
+            }}>{application.status === 'saved' ? 'Unsave' : 'Un-skip'}</Button>}
           </div>
         </div>
       </div>

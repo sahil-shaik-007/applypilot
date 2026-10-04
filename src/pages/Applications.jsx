@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap , Bell } from 'lucide-react';
+import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS } from '../components/ui';
 
@@ -36,12 +36,26 @@ function AppDrawer({ a, onClose }) {
             </select>
             <Button size="sm" icon={ExternalLink} onClick={() => app.run('shell:open', [a.job.applyUrl || a.job.url])}>Open</Button>
             {a.screenshotPath && <Button size="sm" icon={Image} onClick={() => app.run('applications:openScreenshot', [a.id])}>Proof</Button>}
-            <Button size="sm" variant="ghost" icon={Trash2} onClick={async () => { await app.run('applications:delete', [a.id]); app.set((s) => ({ applications: s.applications.filter((x) => x.id !== a.id) })); onClose(); }} />
+            <Button size="sm" variant="ghost" icon={Trash2} title="Delete from tracker" onClick={async () => {
+              if (!(await app.confirm({ title: 'Delete application?', message: `"${a.job.title}" at ${a.job.company} will be removed from your tracker (the employer is not notified).` }))) return;
+              await app.run('applications:delete', [a.id]); app.set((s) => ({ applications: s.applications.filter((x) => x.id !== a.id) })); onClose();
+            }} />
           </div>
         </div>
       </div>
     )}>
       <div className="col" style={{ gap: 16 }}>
+        {['saved', 'queued', 'failed', 'skipped', 'awaiting-you'].includes(a.status) && (
+          <div className="card pad row wrap" style={{ gap: 10 }}>
+            <span className="small grow">{a.status === 'awaiting-you' ? 'Finish it in the browser, or run it again after answering the open questions.' : a.status === 'failed' ? 'This attempt failed — try again.' : 'Ready when you are.'}</span>
+            <select className="select" style={{ width: 200, height: 32 }} value={a.resumeId || ''} onChange={(e) => update({ resumeId: e.target.value }, 'Resume updated')} title="Resume to send">
+              {!app.resumes.some((r) => r.id === a.resumeId) && <option value="">✨ Best-matching resume</option>}
+              {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <Button size="sm" variant="ghost" onClick={() => app.run('applications:approve', [[a.id], 'review'], 'Opening the pre-filled form…')}>Fill, I submit</Button>
+            <Button size="sm" variant="primary" icon={Send} disabled={!app.resumes.length} onClick={() => app.run('applications:approve', [[a.id], app.plan.autoSubmit ? 'auto' : 'review'], 'Applying…')}>{app.plan.autoSubmit ? 'Apply now' : 'Apply'}</Button>
+          </div>
+        )}
         <div className="grid g3">
           <div className="card pad metric"><div className="k">Match</div><div className="v">{a.score ?? '—'}%</div></div>
           <div className="card pad metric"><div className="k">Resume</div><div className="v small ellipsis" style={{ fontSize: 14 }}>{a.resumeName || '—'}</div></div>
@@ -89,6 +103,13 @@ export default function Applications() {
   const [openId, setOpenId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   const [q, setQ] = useState('');
+  const [colLimit, setColLimit] = useState({});
+  const [tableLimit, setTableLimit] = useState(200);
+  const clearClosed = async (items) => {
+    if (!(await app.confirm({ title: 'Clear closed applications?', message: `${items.length} rejected, failed or skipped application(s) will be removed from your tracker. Jobs you skipped may show up again in future searches.`, confirmLabel: 'Clear' }))) return;
+    await app.run('applications:deleteMany', [items.map((a) => a.id)], 'Cleared');
+    app.set((s) => ({ applications: s.applications.filter((x) => !items.some((i) => i.id === x.id)) }));
+  };
   const list = useMemo(() => app.applications.filter((a) => !q || `${a.job.title} ${a.job.company}`.toLowerCase().includes(q.toLowerCase())), [app.applications, q]);
   const open = app.applications.find((a) => a.id === openId);
   const followUps = app.applications.filter((a) => a.status === 'applied' && a.followUpAt && new Date(a.followUpAt) < new Date());
@@ -124,8 +145,10 @@ export default function Applications() {
             const items = list.filter((a) => col.statuses.includes(a.status));
             return (
               <div key={col.id} className={`kan-col ${dragOver === col.id ? 'drop' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragOver(col.id); }} onDragLeave={() => setDragOver(null)} onDrop={(e) => drop(col, e)}>
-                <div className="kan-head"><span className="dot" style={{ color: col.color }} />{col.label}<span className="dim" style={{ marginLeft: 'auto' }}>{items.length}</span></div>
-                {items.slice(0, 120).map((a) => (
+                <div className="kan-head"><span className="dot" style={{ color: col.color }} />{col.label}<span className="dim" style={{ marginLeft: 'auto' }}>{items.length}</span>
+                  {col.id === 'rejected' && items.length > 0 && <button className="chip-x" style={{ width: 22, height: 22 }} title="Clear closed applications" onClick={() => clearClosed(items)}><Eraser size={12} /></button>}
+                </div>
+                {items.slice(0, colLimit[col.id] || 60).map((a) => (
                   <motion.div layout layoutId={a.id} key={a.id} className="kan-card" draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', a.id)} onClick={() => setOpenId(a.id)}>
                     <div className="row" style={{ gap: 8 }}>
                       <Logo name={a.job.company} src={a.job.companyLogo} size="sm" />
@@ -140,6 +163,7 @@ export default function Applications() {
                     </div>
                   </motion.div>
                 ))}
+                {items.length > (colLimit[col.id] || 60) && <button className="btn btn-ghost btn-sm" onClick={() => setColLimit((l) => ({ ...l, [col.id]: (l[col.id] || 60) + 100 }))}>Show {Math.min(100, items.length - (colLimit[col.id] || 60))} more</button>}
               </div>
             );
           })}
@@ -149,7 +173,7 @@ export default function Applications() {
           <table className="table">
             <thead><tr><th>Role</th><th>Status</th><th>Match</th><th>Resume</th><th>Campaign</th><th>Source</th><th>Updated</th></tr></thead>
             <tbody>
-              {list.map((a) => (
+              {list.slice(0, tableLimit).map((a) => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setOpenId(a.id)}>
                   <td><div style={{ fontWeight: 600 }}>{a.job.title}</div><div className="small muted">{a.job.company}</div></td>
                   <td><StatusBadge status={a.status} /></td>
@@ -162,6 +186,7 @@ export default function Applications() {
               ))}
             </tbody>
           </table>
+          {list.length > tableLimit && <div style={{ textAlign: 'center', padding: 12 }}><Button size="sm" onClick={() => setTableLimit(tableLimit + 200)}>Show more ({list.length - tableLimit} left)</Button></div>}
         </div>
       )}
       <AppDrawer a={open} onClose={() => setOpenId(null)} />

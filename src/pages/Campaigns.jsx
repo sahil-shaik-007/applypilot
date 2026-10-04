@@ -106,7 +106,7 @@ function CampaignCard({ c, index, onEdit }) {
     setBusy(true);
     try { await app.run(running ? 'campaigns:stop' : 'campaigns:start', [c.id], running ? 'Campaign paused' : 'Campaign started'); } catch {} finally { setBusy(false); }
   };
-  const del = async () => { if (confirm(`Delete campaign "${c.name}"? Its applications stay in your tracker.`)) { const list = await app.run('campaigns:delete', [c.id]); app.set({ campaigns: list }); } };
+  const del = async () => { if (await app.confirm({ title: 'Delete campaign?', message: `"${c.name}" will stop and be removed. Its applications stay in your tracker.` })) { const list = await app.run('campaigns:delete', [c.id]); app.set({ campaigns: list }); } };
   return (
     <motion.div {...stagger(index)} layout className={`card ${running ? 'premium premium-shimmer' : ''}`} style={{ overflow: 'hidden' }}>
       <div style={{ height: 3, background: c.color || 'var(--accent)' }} />

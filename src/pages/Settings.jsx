@@ -152,14 +152,25 @@ function Companies() {
   const [slug, setSlug] = useState('');
   const custom = app.settings.customCompanies || {};
   useEffect(() => { app.run('companies:counts').then(setCounts).catch(() => {}); }, [app.settings]); // eslint-disable-line
+  // Accepts a careers URL (ATS detected from the domain) or a bare slug for the selected ATS.
   const add = async () => {
-    const m = slug.trim().match(/(?:greenhouse\.io\/|lever\.co\/|ashbyhq\.com\/|workable\.com\/|smartrecruiters\.com\/|^)([A-Za-z0-9_.-]+)/);
-    const s = m ? m[1] : slug.trim();
-    if (!s) return;
-    const next = { ...custom, [ats]: [...(custom[ats] || []), { slug: s, name: s }] };
+    const raw = slug.trim();
+    if (!raw) return;
+    const patterns = [
+      ['greenhouse', /greenhouse\.io\/(?:embed\/job_board\?for=)?([A-Za-z0-9_.-]+)/i], ['lever', /lever\.co\/([A-Za-z0-9_.-]+)/i],
+      ['ashby', /ashbyhq\.com\/([A-Za-z0-9_.%-]+)/i], ['workable', /workable\.com\/(?:j\/)?([A-Za-z0-9_.-]+)/i],
+      ['smartrecruiters', /smartrecruiters\.com\/([A-Za-z0-9_.-]+)/i], ['recruitee', /([A-Za-z0-9-]+)\.recruitee\.com/i],
+    ];
+    let kind = ats; let s = raw;
+    const hit = patterns.find(([, re]) => re.test(raw));
+    if (hit) { kind = hit[0]; s = raw.match(hit[1])[1]; }
+    else if (/[/:.]/.test(raw)) return app.toast('That URL is not a Greenhouse, Lever, Ashby, Workable, SmartRecruiters or Recruitee careers page.', 'error');
+    if ((custom[kind] || []).some((c) => c.slug === s)) return app.toast(`${s} is already in your list`, 'error');
+    const next = { ...custom, [kind]: [...(custom[kind] || []), { slug: s, name: s }] };
     app.set({ settings: await app.run('settings:update', [{ customCompanies: next }]) });
     setSlug('');
-    app.toast(`Added ${s} — it's searched in every campaign now`, 'success');
+    setAts(kind);
+    app.toast(`Added ${s} (${kind}) — it's searched in every campaign now`, 'success');
   };
   const remove = async (a, s) => app.set({ settings: await app.run('settings:update', [{ customCompanies: { ...custom, [a]: custom[a].filter((c) => c.slug !== s) } }]) });
   return (
@@ -237,6 +248,13 @@ function Data() {
       <Row title="Export applications (CSV)" desc="Open in Excel or Google Sheets."><Button onClick={() => app.run('data:exportCsv', [], 'CSV saved')}>Export CSV</Button></Row>
       <Row title="Open data folder" desc={app.userDataDir}><Button onClick={() => app.run('shell:openPath', [app.userDataDir])}>Open</Button></Row>
       <Row title="Re-run setup wizard"><Button onClick={async () => { app.set({ settings: await app.run('settings:update', [{ onboarded: false }]) }); }}>Start</Button></Row>
+      <Row title="Delete all my data" desc="Permanently erases your profile, resumes, applications, answers, API keys, license and the ApplyPilot browser profile from this PC, then restarts the app. Export a backup first if you might need it.">
+        <Button variant="danger" icon={Trash2} onClick={async () => {
+          if (!(await app.confirm({ title: 'Delete all ApplyPilot data?', message: 'Everything ApplyPilot stored on this PC will be permanently deleted and the app will restart as if newly installed. This cannot be undone.', confirmLabel: 'Delete everything' }))) return;
+          app.toast('Deleting your data…');
+          try { await app.run('data:reset'); } catch {}
+        }}>Delete everything</Button>
+      </Row>
       <Row title="Version"><span className="muted">ApplyPilot {app.version}</span></Row>
     </div>
   );

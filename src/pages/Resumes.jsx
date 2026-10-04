@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, FileText, Star, Trash2, ExternalLink, Eye, Wand2, TrendingUp } from 'lucide-react';
+import { Upload, FileText, Star, Trash2, ExternalLink, Eye, Wand2, TrendingUp, X, RefreshCw } from 'lucide-react';
 import { useApp, api } from '../lib/store';
 import { Button, Modal, TagInput, Empty, stagger } from '../components/ui';
 
@@ -20,8 +20,11 @@ export function mergeProfile(current = {}, found = {}, overwrite = false) {
 export function useResumeUpload() {
   const app = useApp();
   const [busy, setBusy] = useState(false);
-  const after = (results) => {
-    if (!results || !results.length) return results;
+  const after = (out) => {
+    if (!out) return null;
+    const { results = [], errors = [] } = out;
+    errors.forEach((e) => app.toast(e, 'error'));
+    if (!results.length) return null;
     app.set((s) => ({ resumes: [...s.resumes.filter((r) => !results.some((x) => x.resume.id === r.id)), ...results.map((x) => x.resume)] }));
     app.toast(`${results.length} resume${results.length > 1 ? 's' : ''} uploaded`, 'success');
     return results;
@@ -49,6 +52,28 @@ export function Dropzone({ onDone, compact }) {
       </motion.div>
       <div style={{ fontWeight: 700, marginTop: 10 }}>{busy ? 'Reading your resume…' : 'Drop resumes here or click to upload'}</div>
       <div className="small muted">PDF, DOCX or TXT · upload a different version for each kind of role</div>
+    </div>
+  );
+}
+
+// Compact list of uploaded resumes with remove buttons (used where the full cards would be too big).
+export function ResumeChips() {
+  const app = useApp();
+  if (!app.resumes.length) return null;
+  const remove = async (r) => {
+    if (!(await app.confirm({ title: 'Remove resume?', message: `"${r.fileName}" will be removed from ApplyPilot. Campaigns using it switch to automatic resume selection.`, confirmLabel: 'Remove' }))) return;
+    try { app.set({ resumes: await app.run('resumes:delete', [r.id]) }); app.toast(`Removed ${r.fileName}`, 'success'); } catch {}
+  };
+  return (
+    <div className="chips" style={{ marginTop: 14 }}>
+      <AnimatePresence>
+        {app.resumes.map((r) => (
+          <motion.span key={r.id} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="badge green" style={{ padding: '5px 6px 5px 11px', fontSize: 13, gap: 7 }}>
+            <FileText size={13} />{r.fileName}{r.isDefault && app.resumes.length > 1 ? ' · default' : ''}
+            <button type="button" className="chip-x" title={`Remove ${r.fileName}`} aria-label={`Remove ${r.fileName}`} style={{ width: 20, height: 20 }} onClick={() => remove(r)}><X size={13} /></button>
+          </motion.span>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -83,7 +108,7 @@ function ResumeCard({ r, index }) {
   const [text, setText] = useState(null);
   const [fill, setFill] = useState(false);
   const update = async (patch) => app.set({ resumes: await app.run('resumes:update', [r.id, patch]) });
-  const del = async () => { if (confirm(`Delete "${r.name}"?`)) app.set({ resumes: await app.run('resumes:delete', [r.id]) }); };
+  const del = async () => { if (await app.confirm({ title: 'Delete resume?', message: `"${r.name}" will be removed. Campaigns using it switch to automatic resume selection; past applications keep their history.` })) app.set({ resumes: await app.run('resumes:delete', [r.id]) }); };
   const st = r.stats || {};
   const rate = st.applied ? Math.round(((st.interviews || 0) / st.applied) * 100) : null;
   return (
@@ -113,6 +138,7 @@ function ResumeCard({ r, index }) {
         <Button size="sm" icon={ExternalLink} onClick={() => app.run('resumes:open', [r.id])}>Open</Button>
         <Button size="sm" icon={Eye} onClick={async () => setText(await app.run('resumes:text', [r.id]))}>Parsed text</Button>
         <Button size="sm" icon={Wand2} onClick={() => setFill(true)}>Fill profile</Button>
+        <Button size="sm" variant="ghost" icon={RefreshCw} title="Read the file again with the latest parser" onClick={async () => { const nr = await app.run('resumes:reparse', [r.id], 'Resume re-read'); app.set((s) => ({ resumes: s.resumes.map((x) => (x.id === nr.id ? nr : x)) })); }}>Re-read</Button>
         <div className="grow" />
         <Button size="sm" variant="ghost" icon={Trash2} onClick={del} />
       </div>

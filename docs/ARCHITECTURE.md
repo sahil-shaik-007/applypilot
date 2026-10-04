@@ -60,7 +60,7 @@ To add company boards: add slugs to `scripts/company-candidates.js` and run `nod
 ## Auto-apply engine (`electron/apply/`)
 
 - `engine.js` — `ApplyEngine`: one shared persistent Chromium context (user's installed Edge/Chrome via `playwright-core`, profile in `%APPDATA%/ApplyPilot/browser-profile` so logins persist), a semaphore limiting parallel tabs, per-application `AbortSignal`, screenshots as proof.
-- `adapters/` — `greenhouse`, `lever`, `ashby`, `workable`, `smartrecruiters`, `recruitee` + `generic` (heuristic label→field matching for any form).
+- `adapters/` — `greenhouse`, `lever`, `ashby`, `workable`, `smartrecruiters`, `recruitee` + `generic` (heuristic label→field matching for any form). Greenhouse always opens the embeddable form `job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>` because many companies 302-redirect their job-board page to their own careers site.
 - `answers.js` — deterministic profile-based answerer (names, links, work authorisation, sponsorship, salary, notice period, per-skill years, EEO…) with a fuzzy option matcher. Returns `null` when unsure → falls through to the Q&A memory, then AI, then the user.
 - `dom.js` — robust fill helpers (React-controlled inputs, comboboxes, radios, file upload, captcha detection, cookie banner rejection).
 
@@ -86,6 +86,13 @@ Bring-your-own Anthropic key (stored with Electron `safeStorage` / DPAPI). Uses 
 - **Offline keys:** `AP1.<payload>.<ed25519 signature>`, minted by `scripts/license-tool.js` with `keys/license-private.pem`; verified with `electron/license-public.pem`.
 - **Online keys:** Dodo Payments public `/licenses/activate` + `/licenses/validate`; re-validated on launch with a 14-day offline grace; refunded/revoked keys fall back to Free (data is never locked).
 
+## Resume parsing (`electron/resume.js`)
+
+- PDFs are read with Mozilla **pdf.js** (`pdfjs-dist/legacy`, dynamic ESM import from CommonJS). Word spacing and line breaks are rebuilt from glyph positions, because many generators place each word separately with no space characters. The legacy `pdf-parse` reader is a fallback. DOCX uses `mammoth`; TXT/MD is read directly.
+- Each file is fingerprinted (SHA-1) so duplicates are rejected even under another name. `parserVersion` triggers an automatic one-time re-read when extraction improves (`migrateResumes` runs at startup).
+- `pickResume` uses the explicitly chosen resume, else a role-tag match, else best skill overlap, else the default. A deleted resume falls back to automatic selection.
+- The packaged app ships `pdfjs-dist` unpacked (`asarUnpack`) and excludes its viewer assets and the optional `@napi-rs/canvas` renderer (not needed for text).
+
 ## Storage (`electron/store.js`)
 
 Debounced, atomic (`tmp` + `rename`) JSON collections in `%APPDATA%/ApplyPilot/data`: `settings`, `profile`, `resumes` (files in `resumes/`), `campaigns`, `jobs` (bounded cache), `applications`, `qa`, `activity`, `license`, `platform-usage`. A corrupt file is copied aside and replaced with defaults.
@@ -97,10 +104,15 @@ Debounced, atomic (`tmp` + `rename`) JSON collections in `%APPDATA%/ApplyPilot/d
 - `pages/` — Dashboard, Jobs, Campaigns, ReviewQueue, Applications, Resumes, Profile, QA, Platforms, AIStudio, Settings, Onboarding.
 - `styles.css` — design tokens modelled on trustmrr.com/acquire: `#0a0a0a` background, Inconsolata, `rgb(26,45,58)` premium cards with the `premium-streak` shimmer, 10 px radii, uppercase 10 px labels, pill badges, gradient CTA.
 
+## Trial
+
+A 7-day Pro trial starts automatically on first launch, so onboarding is never blocked by Free-plan limits (e.g. 2 resumes).
+
 ## Testing helpers
 
 | Command | Purpose |
 |---|---|
+| `node scripts/e2e.js [--exe <ApplyPilot.exe>] [--screenshots] [--quick]` | 51-check end-to-end suite through the real UI (see TESTING.md) |
 | `node scripts/test-connectors.js [--only id] [-q "role"]` | Live-test free connectors |
 | `node scripts/test-ats.js [ids…]` | Live-test ATS connectors (counts, timings) |
 | `node scripts/apply-selftest.js` | Engine self-test against a local page (submit path, abort, review) |

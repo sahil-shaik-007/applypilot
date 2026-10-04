@@ -38,6 +38,13 @@ Requirements: Node 20+, Windows 10/11, Microsoft Edge or Google Chrome installed
 - Respect job-source rate limits; connectors already cache and throttle.
 - Use an isolated profile: `APPLYPILOT_USER_DATA=C:\tmp\ap-test` so you never touch real user data.
 
+## Release checklist (every change)
+
+1. `node scripts/e2e.js` — all checks green. Add checks for anything new: every add must have a matching remove/edit on every screen where it appears, including onboarding.
+2. `npm run dist`, then `node scripts/e2e.js --exe release/win-unpacked/ApplyPilot.exe --screenshots`.
+3. Update the installed app by running the new installer **over** the existing install: `release\ApplyPilot-Setup-<ver>.exe /S`. Don't run the uninstaller first: a full uninstall unpins ApplyPilot from the taskbar, while an in-place update keeps pins, shortcuts and user data.
+4. Update `CHANGELOG.md`, docs and screenshots; commit and push.
+
 ## Building and releasing
 
 ```bash

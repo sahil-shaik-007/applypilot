@@ -96,6 +96,37 @@ const job = (file, id) => ({ id: `selftest:${id}`, title: 'Fixture', company: 'F
     });
     check('auto + missing required → needs-attention, not submitted', r.status === 'needs-attention' && r.unanswered.some((u) => u.required), `${r.status} unanswered=${JSON.stringify(r.unanswered)}`);
   }
+  // 6. auto, but the user presses "Hold" during the cancel window → not submitted, handed to user
+  {
+    let submittedEvent = false;
+    const r = await engine.applyToJob({
+      ...base, job: job(f1, 'auto-held'), mode: 'auto',
+      beforeSubmit: async () => { await new Promise((res) => setTimeout(res, 300)); return false; },
+      onEvent: (e) => {
+        if (e.type === 'submitted') submittedEvent = true;
+        if (e.type === 'needs-user') setTimeout(() => { for (const pg of engine._context.pages()) if (/fixture\.html/.test(pg.url())) pg.close().catch(() => {}); }, 800);
+      },
+    });
+    check('auto + Hold in cancel window → not submitted', r.status !== 'submitted' && !submittedEvent, `${r.status} ${r.message}`);
+  }
+  // 7. auto with a cancel window that lets it through → submitted
+  {
+    let asked = false;
+    const r = await engine.applyToJob({ ...base, job: job(f1, 'auto-window'), mode: 'auto', beforeSubmit: async () => { asked = true; return true; } });
+    check('auto + cancel window elapses → submitted', asked && r.status === 'submitted', `${r.status} asked=${asked}`);
+  }
+  // 8. watchdog: a fill that exceeds the time limit is handed to the user and NEVER auto-submitted
+  {
+    let submittedEvent = false;
+    const r = await engine.applyToJob({
+      ...base, job: job(f1, 'auto-timeout'), mode: 'auto', fillTimeoutMs: 1,
+      onEvent: (e) => {
+        if (e.type === 'submitted') submittedEvent = true;
+        if (e.type === 'needs-user') setTimeout(() => { for (const pg of engine._context.pages()) if (/fixture\.html/.test(pg.url())) pg.close().catch(() => {}); }, 1500);
+      },
+    });
+    check('watchdog: slow fill → handed to user, not submitted', r.status !== 'submitted' && !submittedEvent, `${r.status} ${r.message}`);
+  }
   await engine.close();
   const failed = results.filter((x) => !x[1]).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);

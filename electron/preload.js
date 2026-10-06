@@ -12,4 +12,6 @@ contextBridge.exposeInMainWorld('api', {
   },
   on: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
   pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
+  // Ask the main process to re-check that the window fits the screen's usable area.
+  fitWindow: () => ipcRenderer.invoke('window:fit').catch(() => {}),
 });

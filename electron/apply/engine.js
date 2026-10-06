@@ -286,7 +286,14 @@ class ApplyEngine {
       }
 
       emit('step', 'Filling the application form');
-      const fill = await adapter.fill(page, ctx);
+      // Watchdog: a slow or stuck page must never hold a browser slot forever.
+      const FILL_TIMEOUT_MS = opts.fillTimeoutMs || 180000;
+      let fillTimer;
+      const fill = await Promise.race([
+        adapter.fill(page, ctx),
+        new Promise((resolve) => { fillTimer = setTimeout(() => { emit('step', 'Form is taking too long to fill — handing it to you'); resolve({ filledCount: 0, unanswered: [], timedOut: true }); }, FILL_TIMEOUT_MS); }),
+      ]).finally(() => clearTimeout(fillTimer));
+      if (fill.timedOut) result.message = 'Filling took too long';
       throwIfAborted(signal);
       result.filledCount = fill.filledCount || 0;
       result.unanswered = fill.unanswered || [];
@@ -303,9 +310,17 @@ class ApplyEngine {
       }
 
       captcha = captcha || await dom.detectCaptcha(page);
-      const canAuto = mode === 'auto' && !assisted && adapter.autoSubmit && AUTO_SUBMIT_ATS.has(adapter.id);
+      const canAuto = mode === 'auto' && !assisted && !fill.timedOut && adapter.autoSubmit && AUTO_SUBMIT_ATS.has(adapter.id); // a timed-out fill is never submitted
 
-      if (canAuto && !requiredMissing.length && !captcha) {
+      // Optional last-chance hook (e.g. a cancel window): returning false turns this into a review hand-off.
+      let proceed = true;
+      if (canAuto && !requiredMissing.length && !captcha && typeof opts.beforeSubmit === 'function') {
+        try { proceed = (await opts.beforeSubmit({ filledCount: result.filledCount, screenshotPath: result.screenshotPath })) !== false; } catch { proceed = false; }
+        throwIfAborted(signal);
+      }
+      if (canAuto && !requiredMissing.length && !captcha && !proceed) {
+        emit('needs-user', 'Auto-submit was held — review the filled form and submit it yourself.', { unanswered: result.unanswered });
+      } else if (canAuto && !requiredMissing.length && !captcha) {
         emit('step', 'Submitting application');
         ctx.allowSubmit = true;
         let clicked = false;

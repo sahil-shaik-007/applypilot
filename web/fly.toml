@@ -1,0 +1,43 @@
+# Fly.io config for ApplyPilot Cloud. Deploy from the REPOSITORY ROOT so the build context includes
+# electron/connectors and electron/data:
+#   fly volumes create applypilot_data --size 1 --region <region> --config web/fly.toml
+#   fly secrets set GOOGLE_CLIENT_ID=... APP_ORIGIN=https://<your-app>.fly.dev --config web/fly.toml
+#   fly deploy . --config web/fly.toml
+app = "applypilot-cloud"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"   # resolved relative to this file (web/Dockerfile)
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8787"
+  DATABASE_PATH = "/data/applypilot.db"
+  TRUST_PROXY = "1"
+
+[[mounts]]
+  source = "applypilot_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  # SQLite lives on one volume: never scale beyond a single machine.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

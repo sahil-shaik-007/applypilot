@@ -1,0 +1,30 @@
+# Render Blueprint for ApplyPilot Cloud (one Docker web service + persistent disk for SQLite).
+# Render looks for render.yaml at the repo root by default; when creating the Blueprint, set the
+# Blueprint file path to web/render.yaml.
+services:
+  - type: web
+    name: applypilot-cloud
+    runtime: docker
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: .
+    plan: starter            # a persistent disk requires a paid instance
+    numInstances: 1          # SQLite + in-memory rate limits: run exactly one instance
+    healthCheckPath: /api/health
+    autoDeploy: false
+    disk:
+      name: applypilot-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /data/applypilot.db
+      - key: PORT
+        value: "8787"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: APP_ORIGIN
+        sync: false          # e.g. https://app.applypilot.app (set in the dashboard)
+      - key: GOOGLE_CLIENT_ID
+        sync: false          # set in the dashboard

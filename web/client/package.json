@@ -1,0 +1,28 @@
+{
+  "name": "@applypilot/web-client",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ApplyPilot mobile-first PWA (zero-knowledge encrypted client).",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/gen-icons.mjs && vite build",
+    "preview": "vite preview --port 5174",
+    "e2e": "node e2e/mobile.e2e.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@fontsource/geist-pixel": "^5.3.0",
+    "@fontsource/inconsolata": "^5.3.0",
+    "framer-motion": "^14.0.0",
+    "lucide-react": "^1.50.0",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.2"
+  }
+}

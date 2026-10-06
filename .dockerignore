@@ -1,0 +1,25 @@
+# Patterns are relative to the build context, which is the REPOSITORY ROOT
+# (docker build -f web/Dockerfile .). Docker reads <Dockerfile>.dockerignore or the root .dockerignore;
+# to apply this file, copy it to web/Dockerfile.dockerignore or to the repo root (see web/README.md).
+# The Dockerfile COPYs explicit paths only, so secrets never reach the image either way.
+**/node_modules
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+keys
+**/*.pem
+release
+dist
+build
+src
+scripts
+docs
+**/*.log
+**/*.db
+**/*.db-wal
+**/*.db-shm
+web/server/data
+web/client/dist
+web/client/e2e
+.claude

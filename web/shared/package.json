@@ -1,0 +1,5 @@
+{
+  "name": "@applypilot/shared",
+  "private": true,
+  "type": "module"
+}

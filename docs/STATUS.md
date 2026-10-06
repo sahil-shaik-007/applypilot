@@ -1,8 +1,10 @@
-# ApplyPilot — status (v1.1.0, 4 Oct 2026)
+# ApplyPilot — status (v1.2.0, 6 Oct 2026)
 
-**Installer:** `release/ApplyPilot-Setup-1.1.0.exe` (~115 MB, per-user NSIS install). Run `npm run dist` to rebuild.
+**Installer:** `release/ApplyPilot-Setup-1.2.0.exe` (~115 MB, per-user NSIS install). Run `npm run dist` to rebuild.
 
-**Automated tests:** 51/51 end-to-end checks pass on the packaged build (three consecutive runs); apply-engine self-test 5/5. See [TESTING.md](TESTING.md).
+**Automated tests:** desktop E2E 65/65, phone↔desktop sync 10/10, engine self-test 8/8, cloud server 64 passing, vault crypto 9/9. See [TESTING.md](TESTING.md).
+
+**Cloud (phone & web):** built and tested locally. It isn't deployed yet: you need a host, a domain and a Google OAuth client ID. Steps are in [web/README.md](../web/README.md).
 
 ## Verified working (tested end-to-end in the real app)
 - Onboarding wizard → resume import (name, email, phone, links, years, 19 skills) → profile → first campaign → 7-day Pro trial.

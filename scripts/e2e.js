@@ -270,6 +270,86 @@ async function profileAndResumes() {
   });
 }
 
+async function windowAndLayout() {
+  log('\n▸ Window fitting & small screens');
+  // Use the real window size (drop Playwright's fixed viewport emulation for this suite).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  const winState = () => app.evaluate(({ BrowserWindow, screen }) => {
+    const w = BrowserWindow.getAllWindows()[0]; const c = w.getContentBounds(); const wa = screen.getDisplayMatching(c).workArea;
+    return { max: w.isMaximized(), content: c, wa, fits: c.x >= wa.x - 2 && c.y >= wa.y - 2 && c.x + c.width <= wa.x + wa.width + 2 && c.y + c.height <= wa.y + wa.height + 2 };
+  });
+  await check('an oversized window is pulled back inside the work area (above the taskbar)', async () => {
+    await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows()[0]; w.unmaximize(); const wa = screen.getPrimaryDisplay().workArea; w.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height + 150 }); });
+    await sleep(900);
+    const s = await winState();
+    assert(s.fits, `still overflows: ${JSON.stringify(s)}`);
+  });
+  await check('a maximized window that covers the taskbar is corrected', async () => {
+    await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows()[0]; w.maximize(); });
+    await sleep(700);
+    await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows()[0]; const d = screen.getPrimaryDisplay(); w.setBounds({ ...d.bounds, height: d.bounds.height + 40 }); w.emit('resize'); });
+    await sleep(1200);
+    const s = await winState();
+    assert(s.fits, `maximized window overflows: ${JSON.stringify(s)}`);
+  });
+  await check('restoring from tray keeps the window maximized and inside the work area', async () => {
+    await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.maximize(); });
+    await sleep(600);
+    await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.minimize(); });
+    await sleep(600);
+    await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; if (w.isMinimized()) w.restore(); if (!w.isVisible()) w.show(); w.focus(); });
+    await sleep(900);
+    const s = await winState();
+    assert(s.max && s.fits, JSON.stringify(s));
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].unmaximize());
+    await sleep(500);
+  });
+  await check('minimum window size fits a 1366x768 laptop work area', async () => {
+    const min = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getMinimumSize());
+    assert(min[0] <= 1280 && min[1] <= 640, `min size ${min}`);
+    return `min ${min.join('x')}`;
+  });
+  const pages = ['Dashboard', 'Find jobs', 'Campaigns', 'Review queue', 'Applications', 'Resumes', 'Profile', 'Answer bank', 'Job platforms', 'AI studio', 'Settings'];
+  for (const [w, h] of [[1280, 672], [1366, 728], [1024, 600], [960, 560]]) {
+    await check(`every page fits and stays reachable at ${w}x${h}`, async () => {
+      await app.evaluate(({ BrowserWindow }, [w, h]) => { const win = BrowserWindow.getAllWindows()[0]; win.unmaximize(); win.setContentSize(w, h); }, [w, h]);
+      await sleep(700);
+      const problems = [];
+      for (const p of pages) {
+        await page.locator('.nav-item', { hasText: p }).first().click({ force: true }).catch(() => page.locator(`.nav-item[title="${p}"]`).first().click());
+        await page.waitForTimeout(500);
+        const r = await page.evaluate(() => {
+          const out = [];
+          const main = document.querySelector('.main');
+          // Real content crossing the right edge (decorative glows, the logo marquee and
+          // intentionally scrollable regions like the kanban/table are excluded).
+          if (main) {
+            const right = main.getBoundingClientRect().right + 2;
+            const offenders = [...main.querySelectorAll('.page *')].filter((el) => {
+              if (el.closest('.glow, .marquee, .kanban, .card[style*="overflow"], table')) return false;
+              const r = el.getBoundingClientRect();
+              return r.width > 0 && r.height > 0 && r.right > right && getComputedStyle(el).visibility !== 'hidden';
+            });
+            if (offenders.length) out.push(`content cut off at right: ${offenders.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}`).join(', ')}`);
+          }
+          const se = document.scrollingElement;
+          if (se.scrollHeight > window.innerHeight + 1) out.push(`document taller than window ${se.scrollHeight}>${innerHeight}`);
+          const sb = document.querySelector('.sidebar');
+          if (sb) { sb.scrollTop = sb.scrollHeight; const last = [...sb.querySelectorAll('.nav-item, .sidebar-foot')].filter((e) => e.offsetParent).pop(); if (last && last.getBoundingClientRect().bottom > window.innerHeight + 1) out.push('sidebar end unreachable'); sb.scrollTop = 0; }
+          return out;
+        });
+        if (r.length) problems.push(`${p}: ${r.join(', ')}`);
+      }
+      assert(!problems.length, problems.join(' | '));
+    });
+  }
+  await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows()[0]; const wa = screen.getPrimaryDisplay().workArea; w.setBounds({ x: wa.x + 20, y: wa.y + 10, width: Math.min(1440, wa.width - 40), height: Math.min(900, wa.height - 20) }); });
+  await page.setViewportSize({ width: 1440, height: 900 }).catch(() => {});
+  await cdp.detach().catch(() => {});
+  await sleep(500);
+}
+
 async function campaigns() {
   log('\n▸ Campaigns (parallel, live network)');
   const resumes = await call('resumes:list');
@@ -423,7 +503,7 @@ async function applicationsPage() {
   await shot('11-applications');
   await check('saved application drawer offers resume choice, apply and delete', async () => {
     const job = (await call('jobs:list', { limit: 400 })).find((j) => !j.appStatus);
-    assert(job, 'no unsaved job available');
+    if (!job) return QUICK ? 'skipped in --quick (no jobs fetched)' : assert(false, 'no unsaved job available');
     await call('jobs:save', job.id);
     await nav('Dashboard'); await nav('Applications');
     const card = page.locator('.kan-col', { hasText: 'Saved' }).locator('.kan-card').first();
@@ -453,6 +533,74 @@ async function applicationsPage() {
     const left = (await call('applications:list')).filter((a) => ['rejected', 'failed', 'skipped'].includes(a.status)).length;
     assert(left === 0, `${left} left`);
     return `${closed} cleared`;
+  });
+}
+
+async function newFeatures() {
+  log('\n▸ Referrals, imports, filters, research, cancel window');
+  await check('LinkedIn connections import powers "You know N people at …"', async () => {
+    const jobs = await call('jobs:list', { limit: 50 });
+    const job = jobs.find((j) => j.company && j.company.length > 3);
+    if (!job) return QUICK ? 'skipped in --quick (no jobs fetched)' : assert(false, 'no job');
+    const csv = `Notes:\n"export notes"\n\nFirst Name,Last Name,URL,Email Address,Company,Position,Connected On\nAnita,Rao,https://www.linkedin.com/in/anita-test,,${job.company} Pvt Ltd,Senior Engineer,12 Mar 2024\nVik,S,https://www.linkedin.com/in/vik-test,,Some Other Co,PM,01 Jan 2023\n`;
+    const r = await call('network:importText', csv);
+    assert(r.count === 2, JSON.stringify(r));
+    const people = await call('network:forCompany', job.company);
+    assert(people.length === 1 && people[0].name === 'Anita Rao', JSON.stringify(people));
+    await nav('Find jobs');
+    await page.locator('.card.clickable').first().waitFor({ timeout: 5000 }).catch(() => {});
+    const card = page.locator('.card.clickable').first();
+    if (await card.count()) {
+      try {
+        await card.click();
+        await page.locator('.drawer', { hasText: 'Research & referrals' }).waitFor({ timeout: 8000 });
+        assert(/Interview questions/.test(await page.locator('.drawer').innerText()), 'research links missing');
+      } finally {
+        await page.keyboard.press('Escape');
+        await page.locator('.drawer').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+      }
+    }
+    await call('network:clear');
+    return `${job.company}: 1 connection matched`;
+  });
+  await check('tracker CSV import (Teal format) adds applications and skips duplicates', async () => {
+    const csv = 'Company,Job Position,Status,Date Applied,Job URL,Location,Notes\nImportCo Alpha,Data Analyst,Interviewing,2026-09-01,https://x.test/1,Remote,"Spoke to HR"\nImportCo Beta,BI Developer,Bookmarked,,https://x.test/2,Pune,\n';
+    const r1 = await call('applications:importText', csv, 'teal.csv');
+    const r2 = await call('applications:importText', csv, 'teal.csv');
+    assert(r1.added === 2 && r2.added === 0 && r2.skipped === 2, JSON.stringify([r1.added, r2.added, r2.skipped]));
+    const apps = (await call('applications:list')).filter((a) => /ImportCo/.test(a.job.company));
+    assert(apps.find((a) => a.job.company === 'ImportCo Alpha').status === 'interview', 'status mapping');
+    await call('applications:deleteMany', apps.map((a) => a.id));
+  });
+  await check('job filters include "Only jobs I can take" (on) and "Sponsors visa"', async () => {
+    await nav('Find jobs');
+    const body = await page.locator('.jobs-layout').innerText();
+    assert(/Only jobs I can take/.test(body) && /Sponsors visa/.test(body), 'filters missing');
+  });
+  await check('a likely scam is blocked before any browser opens or data is sent', async () => {
+    const r = await call('applications:importText', 'Company,Job Title,Status,Job URL\nQuickCash Jobs,Data Entry (earn daily),Bookmarked,https://wa.me/919999999999\n', 'scam.csv');
+    assert(r.added === 1, 'import failed');
+    const a = (await call('applications:list')).find((x) => x.job.company === 'QuickCash Jobs');
+    await call('applications:approve', [a.id], 'review');
+    let cur;
+    for (let i = 0; i < 20; i++) { await sleep(300); cur = (await call('applications:list')).find((x) => x.id === a.id); if (cur.status !== 'saved' && cur.status !== 'in-progress') break; }
+    const blocked = (cur.events || []).find((e) => e.type === 'blocked');
+    assert(cur.status === 'skipped' && blocked && /scam/.test(blocked.message), `${cur.status}: ${JSON.stringify((cur.events || []).slice(-2))}`);
+    await call('applications:delete', a.id);
+    return blocked.message.slice(0, 80);
+  });
+  await check('cancel window setting exists and Hold is a no-op when nothing is pending', async () => {
+    await nav('Settings');
+    assert(/Cancel window before auto-submit/.test(await page.locator('.page').innerText()), 'setting missing');
+    const held = await call('applications:hold', 'nope');
+    assert(held === false, String(held));
+  });
+  await check('Settings has Network and Phone & web tabs', async () => {
+    await page.locator('.side-list button', { hasText: 'Network' }).click(); await page.waitForTimeout(400);
+    assert(/Import Connections\.csv/.test(await page.locator('.page').innerText()), 'network tab');
+    await page.locator('.side-list button', { hasText: 'Phone & web' }).click(); await page.waitForTimeout(400);
+    assert(/Link this PC/.test(await page.locator('.page').innerText()), 'cloud tab');
+    await shot('18-phone-and-web');
   });
 }
 
@@ -564,7 +712,7 @@ async function stress() {
       createdAt: new Date(Date.now() - i * 60000).toISOString(), updatedAt: new Date().toISOString(),
       appliedAt: i % 3 ? new Date(Date.now() - i * 3600000).toISOString() : null,
     }));
-    const real = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const real = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { items: [] };
     await app.close();
     fs.writeFileSync(file, JSON.stringify({ items: [...real.items, ...items] }));
     // Also expire the trial so the Free plan limits can be checked after relaunch.
@@ -601,7 +749,7 @@ async function stress() {
     await call('applications:deleteMany', items.map((x) => x.id));
     return `${JSON.stringify(timings)} · table rows ${rows}`;
   });
-  await check('Free plan limits are enforced in the app', async () => freeChecks[0]());
+  await check('Free plan limits are enforced in the app', async () => { assert(freeChecks[0], 'stress relaunch did not run'); return freeChecks[0](); });
 }
 const freeChecks = [];
 
@@ -683,11 +831,13 @@ async function deleteAllData() {
   try {
     await onboarding();
     await profileAndResumes();
+    await windowAndLayout();
     await campaigns();
     await reviewAndApply();
     await answerBank();
     await applicationsPage();
     await jobsPage();
+    await newFeatures();
     await platforms();
     await settingsAndPlans();
     await freePlanLimits();

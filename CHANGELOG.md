@@ -2,6 +2,43 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] — 2026-10-06
+
+### Fixed
+- **Window could extend under the Windows taskbar** (bottom of the app unreachable), e.g. after display, resolution or scaling changes, and on small laptops where the old 1080×700 minimum size exceeded the usable area. New `electron/windowFit.js`:
+  - re-validates the window against the display's work area on show/restore/maximize/resize/move and on display changes
+  - the page reports back if it's ever taller than the screen
+  - minimum size is now 960×560, the window size and position are remembered and validated, and restoring from the tray keeps the maximized state
+  - compact layout for short screens, plus an icon-rail sidebar below 1080 px wide
+  - covered by new E2E checks at 1280×672, 1366×728, 1024×600 and 960×560
+- **Apply engine watchdog**: a stuck page could hold a browser slot forever. Filling is now capped at 3 min; a timed-out form is handed to you and is **never** auto-submitted.
+
+### Added (from the competitive analysis of 37 products: docs/COMPETITIVE_ANALYSIS.md)
+- **Truthful tailored resume PDF per job.** Claude rewrites your real resume for the job; a verifier removes any skill, employer, school, certification or claim not in your original; an ATS-friendly PDF is generated and uploaded for that application. It can run per job (AI tools) or for every job in a campaign ("AI-tailor").
+- **Eligibility checks** before any personal data leaves the PC:
+  - scam detection (fees, WhatsApp/Telegram recruiting, shorteners/generic forms, too-good earnings, requests for ID/bank details)
+  - posting-language detection against the languages you speak
+  - remote-region restrictions ("US only", "EMEA") against your country
+  - Jobs filter "Only jobs I can take" (on by default)
+- **Visa sponsorship detection**: badge and "Sponsors visa" filter; "no sponsorship" jobs are skipped automatically if your profile says you need a visa.
+- **Cancel window before every auto-submit** (default 30 s, configurable) with Hold / Submit now in the Review queue and a desktop notification.
+- **Still-open check** right before applying (Greenhouse, Lever, Ashby, SmartRecruiters public APIs); closed jobs are skipped.
+- **Referral finder**: import LinkedIn Connections.csv (stays local); every job shows who you know there.
+- **Research links** on every job: people, company page, Glassdoor/AmbitionBox reviews, interview questions, news. AI **referral request** and **follow-up email** writers.
+- **Market pay**: 25th–75th percentile salary for similar roles, computed locally.
+- **Morning digest** notification (new matches, forms to submit, follow-ups due, questions to answer).
+- **Tracker import** from Teal, Huntr, Simplify or any spreadsheet CSV (auto-detects columns, maps statuses, skips duplicates), and a **work-search log** export.
+- **Phone & web companion (ApplyPilot Cloud)** — see docs/CLOUD.md and web/README.md:
+  - mobile-first PWA with Google sign-in, job search, swipe triage, a quick-fill sheet for applying from the phone, and "send to my laptop"
+  - **zero-knowledge, end-to-end encrypted** sync: AES-256-GCM, PBKDF2-SHA256 600k, recovery key, AAD-bound records, non-extractable keys, auto-lock
+  - hardened server: hashed session/device tokens, CSRF double-submit + Origin checks, strict CSP, HSTS, rate limits, quotas, hard-delete account
+  - desktop **Settings → Phone & web** links this PC with a one-time code and syncs every 60 s
+- Tests:
+  - `scripts/cloud-sync.e2e.js`: phone ↔ desktop, 10 checks, including "the server DB contains no readable personal data"
+  - E2E grew to 65 checks
+  - engine self-test grew to 8 checks (cancel-window Hold, watchdog never submits)
+  - server: 64 tests
+
 ## [1.1.0] — 2026-10-04
 
 Quality release driven by a new 51-check end-to-end test suite (`scripts/e2e.js`), run against both the dev build and the packaged installer.

@@ -9,9 +9,31 @@ ApplyPilot is a Windows desktop app that searches **every job board at once**, r
 - **Explainable match score** — title, skills, experience, location and freshness, with matched/missing skills and ghost-job/scam flags.
 - **Auto-apply engine** — fills Greenhouse, Lever, Ashby, Workable, SmartRecruiters and Recruitee forms in your own Edge/Chrome (separate profile). LinkedIn, Indeed, Naukri & others use *assisted mode*: we fill, you click submit (their terms forbid bots).
 - **Answer bank** — screening questions are answered from your profile, your saved answers, or AI only when the answer is clearly supported. Unknown questions pause and wait for you — nothing is guessed.
-- **AI studio (Claude, bring-your-own key)** — ATS score + missing keywords + truthful bullet rewrites, tailored cover letters, interview-prep packs, recruiter messages.
+- **AI studio (Claude, bring-your-own key)** — ATS score + missing keywords + truthful bullet rewrites, tailored cover letters, interview-prep packs, recruiter, referral and follow-up messages.
+- **Truthful tailored resume PDF per job** — Claude rewrites your real resume for one job; a verifier removes any skill, employer, school or claim that isn't in your original; the ATS-friendly PDF is what gets uploaded (per job, or automatically per campaign).
+- **Only jobs you can actually take** — scam detection (fees, WhatsApp/Telegram recruiting, link shorteners, "earn ₹5,000/day") blocks a posting *before any data leaves your PC*; postings in languages you don't speak and remote jobs restricted to other countries are filtered; visa-sponsorship badge + filter (auto-skips "no sponsorship" jobs if you need a visa).
+- **Referral finder** — import LinkedIn's Connections.csv (stays local) and every job shows who you already know there, plus one-click research links (people, reviews, interview questions, news) and an AI referral request.
+- **Market pay** — 25th–75th percentile salary for similar roles, computed locally from every job ApplyPilot has seen.
+- **Safety nets** — cancel window before every auto-submit ("Hold" turns it into a review), a still-open check right before applying, and a watchdog so a stuck page never blocks a campaign.
+- **Phone & web companion** — a mobile website (PWA) with Google sign-in: search and swipe through matches on your phone, apply there with a quick-fill sheet, or send jobs to your laptop, which fills them when it's on. Data syncs **end-to-end encrypted** (AES-256-GCM, PBKDF2 600k, zero-knowledge — see [docs/CLOUD.md](docs/CLOUD.md)).
+- **Tracker extras** — import from Teal/Huntr/Simplify CSV, follow-up email writer, morning digest notification, work-search log export.
 - **Tracker** — drag-and-drop pipeline (Saved → Applied → Interview → Offer), notes, follow-up reminders, proof screenshots, CSV export.
 - **Private by design** — all data stays on your PC; API keys are encrypted with Windows DPAPI; one click exports or deletes everything.
+
+## Why ApplyPilot
+
+We studied 37 auto-apply products in October 2026 ([docs/COMPETITIVE_ANALYSIS.md](docs/COMPETITIVE_ANALYSIS.md)). Honestly, no single feature here is unique; some rival has each piece. What nobody else combines is:
+
+1. **Auto-submit only where site terms allow it, enforced in code.** Greenhouse, Lever, Ashby, Workable, SmartRecruiters and Recruitee only. LinkedIn, Indeed and Naukri are always "we fill, you click submit", so your accounts stay safe.
+2. **Applications leave from your own PC, browser and IP.** Cloud bots submit from vendor servers, which employer fraud filters increasingly flag.
+3. **A desktop installer with local-only data and your own Claude key**, with an optional phone companion that is **end-to-end encrypted (zero-knowledge)**.
+4. **A complete safety set in one product:**
+   - per-company cap, cross-source duplicate guard and an "only jobs I can take" filter (scam, language and region)
+   - never guessing an answer, review-first defaults and a cancel window before every auto-submit
+   - a check that the job is still open, a watchdog on stuck pages, and proof screenshots
+   - a dry-run mode that cannot submit, and delete-everything
+5. **Truthful tailoring.** A resume rewritten for each job is checked against your original, and anything the AI invents is removed.
+6. **No subscription traps.** Free tier, a non-renewing 90-day Sprint Pass, and Lifetime.
 
 ## Screenshots
 
@@ -72,7 +94,13 @@ See [docs/SELLING.md](docs/SELLING.md). In short:
 | Path | What |
 |---|---|
 | `electron/main.js` | App window, tray, IPC, notifications, follow-up reminders |
-| `electron/campaigns.js` | Parallel campaign runner, duplicate & per-company guards, Q&A memory |
+| `electron/campaigns.js` | Parallel campaign runner, duplicate & per-company guards, Q&A memory, cancel window, scam/liveness guards |
+| `electron/eligibility.js` | Scam detection, posting-language detection, remote-region restrictions |
+| `electron/tailoredResume.js` | Truthful per-job resume: verifier + ATS-friendly PDF rendering |
+| `electron/cloudSync.js` | Zero-knowledge phone/web sync (device link, encrypted push/pull, outbox) |
+| `electron/windowFit.js` | Keeps the window above the taskbar on every display/scaling change |
+| `electron/csvImport.js`, `electron/liveness.js` | LinkedIn/tracker CSV imports; "is this job still open?" checks |
+| `web/` | Cloud server (Express + SQLite, Google sign-in, encrypted sync API) and the mobile PWA (`web/client`) — see [web/README.md](web/README.md) |
 | `electron/connectors/` | One file per job source + `index.js` aggregator (dedupe across sources) |
 | `electron/apply/` | Playwright auto-apply engine, ATS adapters, profile-based answerer |
 | `electron/match.js` | Match scoring, skill extraction, ghost-job flags |

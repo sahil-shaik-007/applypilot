@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn } from 'lucide-react';
+import { Smartphone, RefreshCw, Lock, Users, Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Field, Switch, Seg } from '../components/ui';
 import { CONFIG, PRICING } from '../config';
@@ -10,6 +10,8 @@ const TABS = [
   { id: 'sources', label: 'Job sources', icon: Database },
   { id: 'ai', label: 'AI', icon: Bot },
   { id: 'companies', label: 'Company boards', icon: Building2 },
+  { id: 'network', label: 'Network (referrals)', icon: Users },
+  { id: 'cloud', label: 'Phone & web', icon: Smartphone },
   { id: 'plan', label: 'Plan & license', icon: Crown },
   { id: 'data', label: 'Data & privacy', icon: HardDrive },
 ];
@@ -66,6 +68,11 @@ function General() {
       </Row>
       <Row title="Default apply mode" desc="Used for one-off applies from the Jobs page.">
         <Seg value={s.defaultApplyMode} onChange={(v) => up({ defaultApplyMode: v })} options={[{ value: 'review', label: 'Fill, I submit' }, { value: 'auto', label: 'Autopilot' }]} />
+      </Row>
+      <Row title="Cancel window before auto-submit" desc="Autopilot waits this long (and notifies you) before pressing submit, so you can hold any application. 0 = submit immediately.">
+        <select className="select" style={{ width: 140 }} value={s.submitDelaySeconds ?? 30} onChange={(e) => up({ submitDelaySeconds: +e.target.value })}>
+          {[0, 15, 30, 60, 120, 300].map((v) => <option key={v} value={v}>{v === 0 ? 'Off' : v < 60 ? `${v} seconds` : `${v / 60} minute${v > 60 ? 's' : ''}`}</option>)}
+        </select>
       </Row>
       <Row title="Global daily application cap" desc="Safety limit across all campaigns. Quality beats volume."><input className="input" type="number" style={{ width: 100 }} defaultValue={s.dailyApplyLimit} onBlur={(e) => up({ dailyApplyLimit: +e.target.value })} /></Row>
       <Row title="Default minimum match score"><input className="input" type="number" style={{ width: 100 }} defaultValue={s.minMatchScore} onBlur={(e) => up({ minMatchScore: +e.target.value })} /></Row>
@@ -193,6 +200,84 @@ function Companies() {
   );
 }
 
+function Cloud() {
+  const app = useApp();
+  const [st, setSt] = useState(null);
+  const [form, setForm] = useState({ serverUrl: CONFIG.cloudUrl, code: '', passphrase: '' });
+  const [busy, setBusy] = useState(false);
+  const load = () => app.run('cloud:status').then(setSt).catch(() => {});
+  useEffect(() => { load(); const off = window.api.on((ch, p) => { if (ch === 'cloud:status') setSt(p); }); return off; }, []); // eslint-disable-line
+  const link = async () => {
+    setBusy(true);
+    try { setSt(await app.run('cloud:link', [form], 'Linked — your phone and this PC now share an encrypted vault')); setForm((f) => ({ ...f, code: '', passphrase: '' })); } catch {} finally { setBusy(false); }
+  };
+  if (!st) return null;
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <p className="muted" style={{ margin: 0 }}>Apply from your phone when you're away from this PC: search and swipe through matches on the ApplyPilot website; jobs you send here wait in your Review queue (or apply on autopilot if you chose that) the next time this app is on. Your profile, resumes and applications sync <b>end-to-end encrypted</b> — the server only ever stores ciphertext it cannot read.</p>
+      {st.linked ? (
+        <div className="card pad col premium" style={{ gap: 10 }}>
+          <div className="row between">
+            <div><div style={{ fontWeight: 700 }}><Lock size={14} style={{ verticalAlign: -2 }} /> Linked to {st.email}</div><div className="small muted">{st.serverUrl} · {st.deviceName}</div></div>
+            <div className="row">
+              <Button icon={RefreshCw} loading={st.syncing || busy} onClick={async () => { setBusy(true); try { setSt(await app.run('cloud:sync')); } catch {} finally { setBusy(false); } }}>Sync now</Button>
+              <Button variant="ghost" onClick={async () => { if (await app.confirm({ title: 'Unlink this PC?', message: 'This PC stops syncing with your phone. Your local data stays here; revoke the device on the website to remove its access completely.', confirmLabel: 'Unlink' })) setSt(await app.run('cloud:unlink')); }}>Unlink</Button>
+            </div>
+          </div>
+          <div className="small muted">{st.lastSyncAt ? `Last sync ${new Date(st.lastSyncAt).toLocaleTimeString()}${st.stats ? ` · ${st.stats.pushed} sent, ${st.stats.pulled} received, ${st.stats.fromPhone} job(s) from your phone` : ''}` : 'Syncing…'}</div>
+          {st.lastError && <div className="small" style={{ color: 'var(--red)' }}>{st.lastError}</div>}
+        </div>
+      ) : (
+        <div className="card pad col" style={{ gap: 12 }}>
+          <div className="section-title" style={{ margin: 0 }}>Link this PC</div>
+          <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+            <li>On your phone, open the ApplyPilot website and sign in with Google.</li>
+            <li>Create your vault passphrase (first time only) → <b>Settings → Devices → Link desktop app</b>.</li>
+            <li>Enter the 8-character code and your vault passphrase here.</li>
+          </ol>
+          <Field label="Server"><input className="input" value={form.serverUrl} onChange={(e) => setForm({ ...form, serverUrl: e.target.value })} /></Field>
+          <div className="grid g2">
+            <Field label="Link code"><input className="input" value={form.code} maxLength={12} placeholder="e.g. 7KQ2MXRA" onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} style={{ letterSpacing: 2, fontWeight: 700 }} /></Field>
+            <Field label="Vault passphrase" help="Only used here to unlock your encryption key; never sent anywhere."><input className="input" type="password" value={form.passphrase} onChange={(e) => setForm({ ...form, passphrase: e.target.value })} /></Field>
+          </div>
+          <div><Button variant="primary" icon={Smartphone} loading={busy} disabled={!form.code || !form.passphrase} onClick={link}>Link this PC</Button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Network() {
+  const app = useApp();
+  const [stats, setStats] = useState(null);
+  const load = () => app.run('network:stats').then(setStats).catch(() => {});
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <p className="muted" style={{ margin: 0 }}>Referrals get interviews several times more often than cold applications. Import your LinkedIn connections and ApplyPilot shows <b>who you already know</b> at every company you look at — with a one-click AI referral message. The file never leaves this PC.</p>
+      <div className="card pad">
+        <div className="section-title">How to get the file (2 minutes)</div>
+        <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+          <li>LinkedIn → <b>Me</b> → <b>Settings &amp; Privacy</b> → <b>Data privacy</b> → <b>Get a copy of your data</b></li>
+          <li>Choose <b>Connections</b> only → <b>Request archive</b> (LinkedIn emails it within ~10 minutes)</li>
+          <li>Unzip it and import <b>Connections.csv</b> below</li>
+        </ol>
+        <Button size="sm" variant="ghost" icon={ExternalLink} style={{ marginTop: 8 }} onClick={() => app.run('shell:open', ['https://www.linkedin.com/mypreferences/d/download-my-data'])}>Open LinkedIn data export</Button>
+      </div>
+      <div className="card pad row between">
+        <div>
+          <div style={{ fontWeight: 700 }}>{stats && stats.count ? `${stats.count.toLocaleString()} connections imported` : 'No connections imported yet'}</div>
+          {stats && stats.importedAt && <div className="small dim">Imported {new Date(stats.importedAt).toLocaleDateString()}</div>}
+        </div>
+        <div className="row">
+          {stats && stats.count > 0 && <Button variant="ghost" icon={Trash2} onClick={async () => { if (await app.confirm({ title: 'Remove imported connections?', message: 'The referral finder will stop showing who you know at each company. You can import again anytime.', confirmLabel: 'Remove' })) { await app.run('network:clear'); load(); } }}>Remove</Button>}
+          <Button variant="primary" icon={Users} onClick={async () => { try { const r = await app.run('network:import'); if (r) { app.toast(`Imported ${r.count} connections across ${r.companies} companies`, 'success'); load(); } } catch {} }}>{stats && stats.count ? 'Re-import' : 'Import Connections.csv'}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Plan() {
   const app = useApp();
   const [key, setKey] = useState('');
@@ -263,7 +348,7 @@ function Data() {
 export default function Settings({ params }) {
   const [tab, setTab] = useState(params.tab || 'general');
   useEffect(() => { if (params.tab) setTab(params.tab); }, [params.tab]);
-  const Comp = { general: General, sources: Sources, ai: AI, companies: Companies, plan: Plan, data: Data }[tab];
+  const Comp = { general: General, sources: Sources, ai: AI, companies: Companies, network: Network, cloud: Cloud, plan: Plan, data: Data }[tab];
   return (
     <div className="page">
       <div className="page-head"><div><h1>Settings</h1><p>Tune how ApplyPilot searches and applies.</p></div></div>

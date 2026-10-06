@@ -4,7 +4,9 @@
 const crypto = require('crypto');
 const { searchAll } = require('./connectors');
 const { scoreJob, isExcluded } = require('./match');
+const fs = require('fs');
 const { pickResume } = require('./resume');
+const tailoredResume = require('./tailoredResume');
 
 const today = () => new Date().toISOString().slice(0, 10);
 const sleep = (ms, signal) => new Promise((resolve) => {
@@ -28,10 +30,11 @@ function similarity(a, b) {
 }
 
 class CampaignManager {
-  constructor({ store, getEngine, ai, getPlan, emit, notify, companies }) {
-    Object.assign(this, { store, getEngine, ai, getPlan, emit, notify, companies });
+  constructor({ store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir }) {
+    Object.assign(this, { store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir });
     this.runners = new Map(); // campaignId -> AbortController
     this.applying = new Map(); // applicationId -> AbortController
+    this.pendingSubmits = new Map(); // applicationId -> resolve(boolean) during the cancel window
     this.aiUsage = { day: today(), count: 0 };
   }
 
@@ -296,7 +299,7 @@ class CampaignManager {
     return null;
   }
 
-  async applyApplication(appId, { mode, signal } = {}) {
+  async applyApplication(appId, { mode, signal, force = false } = {}) {
     const app = this.store.applications.get().items.find((a) => a.id === appId);
     if (!app) throw new Error('Application not found');
     const engine = this.getEngine();
@@ -311,6 +314,19 @@ class CampaignManager {
     const job = { ...(this.store.jobs.get().items[app.jobId] || {}), ...app.job, id: app.jobId };
     const resume = pickResume(this.store, { resumeId: app.resumeId || (campaign && campaign.resumeId), job });
     if (!resume) { this.patchApp(appId, { status: 'failed' }, { type: 'error', message: 'Upload a resume first' }); return; }
+    // Don't waste an application on a posting that has already closed.
+    const open = await require('./liveness').isStillOpen(job).catch(() => null);
+    if (open === false) {
+      this.patchApp(appId, { status: 'skipped' }, { type: 'closed', message: 'This job is no longer accepting applications — skipped' });
+      return;
+    }
+    const { scamSignals } = require('./eligibility');
+    const scam = scamSignals(job);
+    if (scam.length && !force) {
+      this.patchApp(appId, { status: 'skipped' }, { type: 'blocked', message: `Blocked before sending any data — looks like a scam (${scam.join(', ')}). Open the posting yourself if you trust it.` });
+      this.log('error', `Blocked likely scam: ${job.title} at ${job.company}`, { applicationId: appId });
+      return;
+    }
     const ac = new AbortController();
     const onCampaignAbort = () => ac.abort();
     if (signal) signal.addEventListener('abort', onCampaignAbort, { once: true });
@@ -354,14 +370,30 @@ class CampaignManager {
       // for a confirmation in the background and finalize() records the outcome whenever it arrives.
       let handOff;
       const handedOff = new Promise((resolve) => { handOff = resolve; });
+      // Use (or create) an AI-tailored, verified resume for this job when available.
+      let upload = { path: resume.path, fileName: resume.fileName, text: resume.text };
+      const cur = this.store.applications.get().items.find((x) => x.id === appId) || app;
+      if (cur.tailored && cur.tailored.path && fs.existsSync(cur.tailored.path)) {
+        upload = { path: cur.tailored.path, fileName: cur.tailored.fileName, text: cur.tailored.text };
+      } else if (campaign && campaign.tailorResume && this.canUseAi() && this.tailoredDir) {
+        try {
+          this.patchApp(appId, {}, { type: 'step', message: 'Tailoring your resume for this job' });
+          const t = await tailoredResume.generate({ ai: this.ai, aiArgs: this.aiArgs(), job, profile, resume, outDir: this.tailoredDir });
+          this.patchApp(appId, { tailored: { ...t, baseResumeId: resume.id } }, { type: 'step', message: `Tailored resume ready${t.removed.length ? ` (${t.removed.length} unsupported claim(s) removed)` : ''}` });
+          upload = { path: t.path, fileName: t.fileName, text: t.text };
+        } catch (e) {
+          this.patchApp(appId, {}, { type: 'warn', message: `Couldn't tailor the resume (${this.ai.errMessage(e)}); using "${resume.name}"` });
+        }
+      }
       const done = engine.applyToJob({
         job,
         profile,
-        resume: { path: resume.path, fileName: resume.fileName, text: resume.text },
+        resume: upload,
         coverLetterText,
         mode: effectiveMode,
         signal: ac.signal,
         answerQuestion: (q, info) => this.answerQuestion(q, info || {}, { job, profile, resume }),
+        beforeSubmit: () => this.cancelWindow(appId, job),
         onEvent: (ev) => {
           if (ev.type === 'needs-user') {
             if (signal) signal.removeEventListener('abort', onCampaignAbort); // pausing a campaign never closes your tab
@@ -382,6 +414,26 @@ class CampaignManager {
       this.bumpStats(campaign, null, 'failed');
       this.applying.delete(appId);
     }
+  }
+
+  // Cancel window before every auto-submit: the user can hold (turn into a review) or submit now.
+  cancelWindow(appId, job) {
+    const secs = Math.max(0, Number(this.settings().submitDelaySeconds ?? 30));
+    if (!secs) return Promise.resolve(true);
+    const until = new Date(Date.now() + secs * 1000).toISOString();
+    this.patchApp(appId, { pendingSubmitUntil: until }, { type: 'step', message: `Submitting in ${secs}s — you can hold it` });
+    this.notify('About to submit an application', `${job.title} at ${job.company} in ${secs}s — open ApplyPilot to hold it`);
+    return new Promise((resolve) => {
+      const done = (ok) => { clearTimeout(t); this.pendingSubmits.delete(appId); this.patchApp(appId, { pendingSubmitUntil: null }); resolve(ok); };
+      const t = setTimeout(() => done(true), secs * 1000);
+      this.pendingSubmits.set(appId, done);
+    });
+  }
+
+  resolvePendingSubmit(appId, ok) {
+    const done = this.pendingSubmits.get(appId);
+    if (done) { done(ok); this.patchApp(appId, {}, { type: 'step', message: ok ? 'Submitting now' : 'Held — you will review it' }); }
+    return !!done;
   }
 
   bumpStats(campaign, resume, key) {

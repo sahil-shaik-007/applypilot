@@ -100,6 +100,51 @@ async function answerQuestion(o) {
   return out.answer;
 }
 
+// A complete, truthful resume rewritten for one job. Returned as structured data; the app renders
+// it to an ATS-friendly PDF and verifies that no new skills were introduced.
+const RESUME_DOC_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    headline: { type: 'string' },
+    contact: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    skills: { type: 'array', items: { type: 'string' } },
+    experience: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { title: { type: 'string' }, company: { type: 'string' }, location: { type: 'string' }, dates: { type: 'string' }, bullets: { type: 'array', items: { type: 'string' } } },
+        required: ['title', 'company', 'location', 'dates', 'bullets'],
+        additionalProperties: false,
+      },
+    },
+    projects: {
+      type: 'array',
+      items: { type: 'object', properties: { name: { type: 'string' }, details: { type: 'string' } }, required: ['name', 'details'], additionalProperties: false },
+    },
+    education: {
+      type: 'array',
+      items: { type: 'object', properties: { school: { type: 'string' }, degree: { type: 'string' }, dates: { type: 'string' }, details: { type: 'string' } }, required: ['school', 'degree', 'dates', 'details'], additionalProperties: false },
+    },
+    certifications: { type: 'array', items: { type: 'string' } },
+    changes: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['name', 'headline', 'contact', 'summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'changes'],
+  additionalProperties: false,
+};
+
+async function tailoredResumeDoc(o) {
+  return call({
+    ...o,
+    effort: 'medium',
+    maxTokens: 12000,
+    schema: RESUME_DOC_SCHEMA,
+    system: `${SYSTEM} You are an expert resume writer. HARD RULES: use ONLY facts present in the candidate's resume and profile. Never add employers, titles, dates, degrees, certifications, tools, skills, numbers or achievements that are not already there. You MAY reorder sections and bullets, rephrase for clarity and impact, mirror the job's terminology where it truthfully describes existing experience, and drop irrelevant details. Keep dates exactly as written.`,
+    prompt: `${candidateBrief(o.profile, o.resumeText)}\n\n${jobBrief(o.job)}\n\nProduce a one-to-two page resume tailored to this job. Put the most relevant skills first (only skills the candidate already has), lead each role with the bullets most relevant to the job, keep 3-6 bullets per recent role, and write a 2-3 sentence summary aimed at this role. In "changes", list 3-6 short notes describing what you emphasised or reordered (not invented).`,
+  });
+}
+
 async function tailorResume(o) {
   return call({
     ...o,
@@ -174,7 +219,9 @@ async function outreach(o) {
     system: SYSTEM,
     effort: 'low',
     maxTokens: 1500,
-    prompt: `${candidateBrief(o.profile, o.resumeText)}\n\n${jobBrief(o.job)}\n\nWrite a short ${o.kind === 'referral' ? 'LinkedIn message asking an employee for a referral' : 'LinkedIn message / email to the hiring manager or recruiter'} for this role (max 90 words, friendly, specific, one clear ask). Plain text.`,
+    prompt: o.kind === 'followup'
+      ? `${candidateBrief(o.profile, o.resumeText)}\n\n${jobBrief(o.job)}\n\nThe candidate applied ${o.days || 7} days ago and has not heard back. Write a short, polite follow-up email to the recruiter/hiring team (subject line + max 110 words): restate interest, one specific reason they fit, and a clear ask for next steps. Plain text, starting with 'Subject:'.`
+      : `${candidateBrief(o.profile, o.resumeText)}\n\n${jobBrief(o.job)}\n\nWrite a short ${o.kind === 'referral' ? 'LinkedIn message asking an employee for a referral' : 'LinkedIn message / email to the hiring manager or recruiter'} for this role (max 90 words, friendly, specific, one clear ask). Plain text.`,
   });
 }
 
@@ -183,4 +230,4 @@ async function testKey({ apiKey, model }) {
   return true;
 }
 
-module.exports = { MODELS, coverLetter, answerQuestion, tailorResume, parseResume, interviewPrep, outreach, testKey, errMessage };
+module.exports = { MODELS, coverLetter, answerQuestion, tailorResume, tailoredResumeDoc, parseResume, interviewPrep, outreach, testKey, errMessage };

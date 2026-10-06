@@ -11,6 +11,11 @@ const resumeLib = require('./resume');
 const ai = require('./ai');
 const license = require('./license');
 const { CampaignManager } = require('./campaigns');
+const windowFit = require('./windowFit');
+const tailored = require('./tailoredResume');
+const csvImport = require('./csvImport');
+const { CloudSync } = require('./cloudSync');
+let cloud = null;
 const PROFILE_SCHEMA = require('./data/profile-schema.json');
 
 // Allows isolated test profiles: APPLYPILOT_USER_DATA=C:	mpp electron .
@@ -101,17 +106,18 @@ function emit(channel, payload) {
 function notify(title, body) {
   if (!store.settings.get().notifications || !Notification.isSupported()) return;
   const n = new Notification({ title, body, icon: getIcon(), silent: false });
-  n.on('click', () => { if (win) { win.show(); win.focus(); } });
+  n.on('click', () => windowFit.reveal(win));
   n.show();
 }
 
 // ---------- window ----------
 function createWindow() {
+  const saved = store.settings.get().windowState;
+  const bounds = windowFit.initialBounds(saved);
   win = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1080,
-    minHeight: 700,
+    ...bounds,
+    minWidth: windowFit.MIN.width,
+    minHeight: windowFit.MIN.height,
     backgroundColor: '#0a0a0a',
     show: false,
     title: 'ApplyPilot',
@@ -126,7 +132,14 @@ function createWindow() {
       spellcheck: true,
     },
   });
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { if (saved && saved.maximized) win.maximize(); win.show(); });
+  // Never let the window extend under the taskbar (see windowFit.js).
+  const recheck = windowFit.attach(win, {
+    log: (m) => console.log(m),
+    onSave: (state) => { store.settings.get().windowState = state; store.settings.save(); },
+  });
+  ipcMain.removeHandler('window:fit');
+  ipcMain.handle('window:fit', () => { recheck('renderer'); return true; });
   if (isDev) win.loadURL(process.env.VITE_DEV_SERVER_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 
@@ -153,12 +166,12 @@ function createTray() {
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
   tray.setToolTip('ApplyPilot');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open ApplyPilot', click: () => { win.show(); win.focus(); } },
+    { label: 'Open ApplyPilot', click: () => windowFit.reveal(win) },
     { label: 'Pause all campaigns', click: () => manager.stopAll() },
     { type: 'separator' },
     { label: 'Quit', click: () => { quitting = true; app.quit(); } },
   ]));
-  tray.on('click', () => { win.show(); win.focus(); });
+  tray.on('click', () => windowFit.reveal(win));
 }
 
 // ---------- IPC ----------
@@ -272,6 +285,28 @@ function registerIpc() {
   });
   handle('jobs:list', (filter) => jobsForUi(filter));
   handle('jobs:get', (id) => store.jobs.get().items[id] || null);
+  // Market salary range for similar roles, computed locally from every job ApplyPilot has seen.
+  handle('insights:salary', (jobId) => {
+    const all = store.jobs.get().items;
+    const job = all[jobId] || (store.applications.get().items.find((a) => a.jobId === jobId) || {}).job;
+    if (!job) return null;
+    const words = (t) => new Set(String(t || '').toLowerCase().replace(/(senior|sr|junior|jr|lead|staff|principal|ii|iii|iv|i)/g, ' ').split(/[^a-z0-9+#]+/).filter((w) => w.length > 1));
+    const target = words(job.title);
+    const cur = job.salaryCurrency || null;
+    const mids = [];
+    for (const j of Object.values(all)) {
+      if (!(j.salaryMin || j.salaryMax) || (cur && j.salaryCurrency && j.salaryCurrency !== cur)) continue;
+      const w = words(j.title); let inter = 0; target.forEach((x) => w.has(x) && inter++);
+      if (!target.size || inter / target.size < 0.6) continue;
+      const lo = j.salaryMin || j.salaryMax; const hi = j.salaryMax || j.salaryMin;
+      mids.push({ v: (lo + hi) / 2, cur: j.salaryCurrency || cur });
+    }
+    if (mids.length < 5) return { count: mids.length };
+    const currency = cur || mids[0].cur;
+    const vals = mids.filter((m) => !currency || m.cur === currency).map((m) => m.v).sort((a, b) => a - b);
+    const q = (p) => vals[Math.min(vals.length - 1, Math.max(0, Math.round(p * (vals.length - 1))))];
+    return { count: vals.length, currency, p25: q(0.25), median: q(0.5), p75: q(0.75) };
+  });
   handle('jobs:save', (jobId) => {
     const job = store.jobs.get().items[jobId];
     if (!job) throw new Error('Job not found');
@@ -326,6 +361,8 @@ function registerIpc() {
   handle('applications:deleteMany', (ids) => { const set = new Set(ids || []); store.applications.update((d) => { d.items = d.items.filter((x) => !set.has(x.id)); }); return true; });
   handle('applications:approve', (ids, mode) => { (Array.isArray(ids) ? ids : [ids]).forEach((id) => manager.applyApplication(id, { mode })); return true; });
   handle('applications:cancel', (id) => manager.cancelApplication(id));
+  handle('applications:hold', (id) => manager.resolvePendingSubmit(id, false));
+  handle('applications:submitNow', (id) => manager.resolvePendingSubmit(id, true));
   handle('applications:openScreenshot', (id) => { const a = store.applications.get().items.find((x) => x.id === id); if (a && a.screenshotPath) shell.openPath(a.screenshotPath); });
 
   // Q&A memory
@@ -340,7 +377,74 @@ function registerIpc() {
   handle('qa:list', () => store.qa.get().items);
   handle('qa:delete', (id) => { store.qa.update((d) => { d.items = d.items.filter((x) => x.id !== id); }); return store.qa.get().items; });
 
+  // ---- Network: LinkedIn connections for the referral finder (stays on this PC)
+  handle('network:import', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Import LinkedIn Connections.csv', properties: ['openFile'], filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (r.canceled) return null;
+    const items = csvImport.parseLinkedInConnections(csvImport.readText(r.filePaths[0]));
+    if (!items.length) throw new Error("That file doesn't look like LinkedIn's Connections.csv (needs First Name, Last Name and Company columns).");
+    store.network.set({ items, importedAt: new Date().toISOString() });
+    return { count: items.length, companies: new Set(items.map((i) => csvImport.normCompany(i.company))).size };
+  });
+  handle('network:importText', (text) => {
+    const items = csvImport.parseLinkedInConnections(text);
+    if (!items.length) throw new Error('No connections found in that CSV.');
+    store.network.set({ items, importedAt: new Date().toISOString() });
+    return { count: items.length };
+  });
+  handle('network:stats', () => ({ count: store.network.get().items.length, importedAt: store.network.get().importedAt }));
+  handle('network:clear', () => { store.network.set({ items: [], importedAt: null }); return true; });
+  handle('network:forCompany', (company) => store.network.get().items.filter((c) => csvImport.sameCompany(c.company, company)).slice(0, 25));
+
+  // ---- Import applications from Teal / Huntr / Simplify / any spreadsheet CSV
+  const importTracker = (text, source) => {
+    const { items, columns } = csvImport.parseTrackerCsv(text);
+    const existing = new Set(store.applications.get().items.map((a) => `${(a.job.company || '').toLowerCase()}|${(a.job.title || '').toLowerCase()}`));
+    let added = 0;
+    store.applications.update((d) => {
+      for (const it of items) {
+        const key = `${it.company.toLowerCase()}|${it.title.toLowerCase()}`;
+        if (existing.has(key)) continue;
+        existing.add(key);
+        const now = new Date().toISOString();
+        d.items.push({
+          id: crypto.randomUUID(), jobId: `import:${crypto.randomUUID()}`, campaignId: null, campaignName: `Imported (${source})`, resumeId: null, resumeName: null, score: null,
+          job: { title: it.title, company: it.company, location: it.location, url: it.url, applyUrl: it.url, source: 'import', salaryText: it.salaryText },
+          status: it.status, notes: it.notes, appliedAt: it.appliedAt || (it.status !== 'saved' ? now : null),
+          events: [{ t: now, type: 'imported', message: `Imported from ${source}` }], createdAt: it.appliedAt || now, updatedAt: now,
+        });
+        added++;
+      }
+    });
+    return { added, skipped: items.length - added, columns };
+  };
+  handle('applications:import', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Import applications (CSV from Teal, Huntr, Simplify or a spreadsheet)', properties: ['openFile'], filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (r.canceled) return null;
+    const out = importTracker(csvImport.readText(r.filePaths[0]), path.basename(r.filePaths[0]));
+    return { ...out, applications: store.applications.get().items };
+  });
+  handle('applications:importText', (text, source) => ({ ...importTracker(text, source || 'CSV'), applications: store.applications.get().items }));
+
+  // ---- Work-search log (e.g. for unemployment-benefit programs)
+  handle('data:exportWorkLog', async (fromIso) => {
+    const r = await dialog.showSaveDialog(win, { title: 'Export work-search log', defaultPath: `work-search-log-${new Date().toISOString().slice(0, 10)}.csv`, filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (r.canceled) return false;
+    const from = fromIso ? new Date(fromIso) : new Date(Date.now() - 28 * 86400000);
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['Date', 'Employer', 'Position', 'Contact method', 'Website / URL', 'Location', 'Result']];
+    const apps = store.applications.get().items.filter((a) => a.appliedAt && new Date(a.appliedAt) >= from).sort((a, b) => new Date(a.appliedAt) - new Date(b.appliedAt));
+    for (const a of apps) rows.push([new Date(a.appliedAt).toLocaleDateString(), a.job.company, a.job.title, 'Online application', a.job.applyUrl || a.job.url, a.job.location, { applied: 'Applied — awaiting response', interview: 'Interview', offer: 'Offer received', rejected: 'Not selected' }[a.status] || a.status]);
+    fs.writeFileSync(r.filePath, rows.map((row) => row.map(q).join(',')).join('\r\n'));
+    return { path: r.filePath, count: apps.length };
+  });
+
   handle('activity:list', () => store.activity.get().items.slice(0, 300));
+  // ---- Phone & web (zero-knowledge sync, see docs/CLOUD.md)
+  handle('cloud:status', () => cloud.status());
+  handle('cloud:link', (o) => cloud.link(o));
+  handle('cloud:unlink', () => cloud.unlink());
+  handle('cloud:sync', () => cloud.syncNow());
   handle('activity:clear', () => { store.activity.update((d) => { d.items = []; }); return true; });
   // Privacy: wipe every ApplyPilot file on this PC (profile, resumes, applications, keys, browser profile) and restart fresh.
   handle('data:reset', async () => {
@@ -375,6 +479,37 @@ function registerIpc() {
   handle('ai:tailor', (jobId, resumeId) => aiCall(ai.tailorResume, () => ctxFor(jobId, resumeId)));
   handle('ai:interviewPrep', (jobId, resumeId) => aiCall(ai.interviewPrep, () => ctxFor(jobId, resumeId)));
   handle('ai:outreach', (jobId, kind) => aiCall(ai.outreach, () => ({ ...ctxFor(jobId), kind })));
+  // Follow-up email: AI when available, otherwise a solid template.
+  handle('ai:followUp', async (appId) => {
+    const a = store.applications.get().items.find((x) => x.id === appId);
+    if (!a) throw new Error('Application not found');
+    const p = store.profile.get().values || {};
+    const days = a.appliedAt ? Math.max(1, Math.round((Date.now() - new Date(a.appliedAt)) / 86400000)) : 7;
+    if (manager.canUseAi()) {
+      try { return await ai.outreach({ ...manager.aiArgs(), job: a.job, profile: p, resumeText: '', kind: 'followup', days }); } catch { /* fall back */ }
+    }
+    return `Subject: Following up on my ${a.job.title} application
+
+Hi ${a.job.company} team,
+
+I applied for the ${a.job.title} role ${days} days ago and wanted to reiterate my interest. With ${p.totalYearsExperience || 'several'} years of experience in ${(p.skills || []).slice(0, 3).join(', ') || 'this field'}, I'm confident I can contribute quickly. I'd welcome the chance to discuss how I can help your team.
+
+Thank you for your time,
+${[p.firstName, p.lastName].filter(Boolean).join(' ')}${p.phone ? `
+${p.phoneCountryCode || ''} ${p.phone}` : ''}${p.linkedin ? `
+${p.linkedin}` : ''}`;
+  });
+  // AI-tailored, verified resume PDF for one job (attached to its application when there is one).
+  handle('resume:tailor', async (jobId, resumeId) => {
+    if (!manager.canUseAi()) throw new Error(getSettings().keys.anthropic ? `Daily AI limit for the ${getPlan().label} plan reached.` : 'Add your Anthropic API key in Settings → AI to tailor resumes.');
+    const ctx = ctxFor(jobId, resumeId);
+    const resume = resumeLib.pickResume(store, { resumeId, job: ctx.job });
+    let r;
+    try { r = await tailored.generate({ ai, aiArgs: manager.aiArgs(), job: { ...ctx.job, id: jobId }, profile: ctx.profile, resume, outDir: path.join(app.getPath('userData'), 'resumes', 'tailored') }); } catch (e) { throw new Error(ai.errMessage(e)); }
+    const appRec = store.applications.get().items.find((a) => a.jobId === jobId);
+    if (appRec) manager.patchApp(appRec.id, { tailored: { ...r, baseResumeId: resume.id } }, { type: 'step', message: `Tailored resume created from "${resume.name}"` });
+    return { ...r, attachedTo: appRec ? appRec.id : null };
+  });
   handle('ai:customJob', (fn, jobText, resumeId) => {
     const job = { title: 'Pasted job', company: '', description: jobText };
     const resume = resumeLib.pickResume(store, { resumeId, job });
@@ -436,6 +571,24 @@ function registerIpc() {
 }
 
 // Daily follow-up reminders for applications that went quiet.
+// Morning digest: one notification a day summarising what needs attention.
+function digestTick() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const s = store.settings.get();
+  if (now.getHours() < 9 || s.lastDigest === today || !store.settings.get().onboarded) return;
+  const apps = store.applications.get().items;
+  const since = Date.now() - 86400000;
+  const fresh = apps.filter((a) => a.status === 'queued' && new Date(a.createdAt).getTime() > since).length;
+  const needs = apps.filter((a) => a.status === 'awaiting-you').length;
+  const follow = apps.filter((a) => a.status === 'applied' && a.followUpAt && new Date(a.followUpAt) < now).length;
+  const pendingQ = store.qa.get().items.filter((q) => !q.answer).length;
+  store.settings.update((x) => { x.lastDigest = today; });
+  if (!fresh && !needs && !follow && !pendingQ) return;
+  const parts = [fresh && `${fresh} new match${fresh > 1 ? 'es' : ''}`, needs && `${needs} form${needs > 1 ? 's' : ''} ready to submit`, follow && `${follow} follow-up${follow > 1 ? 's' : ''} due`, pendingQ && `${pendingQ} question${pendingQ > 1 ? 's' : ''} to answer`].filter(Boolean);
+  notify('Your ApplyPilot morning digest', parts.join(' · '));
+}
+
 function followUpTick() {
   const due = store.applications.get().items.filter((a) => a.status === 'applied' && a.followUpAt && new Date(a.followUpAt) < new Date() && !a.followUpNotified);
   if (!due.length) return;
@@ -448,8 +601,11 @@ app.whenReady().then(() => {
   store = createStore(app.getPath('userData'));
   // Every new install starts with a 7-day Pro trial (no card), so onboarding is never blocked by Free limits.
   store.license.update((d) => { if (!d.trialStartedAt && !d.key) d.trialStartedAt = new Date().toISOString(); });
-  manager = new CampaignManager({ store, getEngine, ai, getPlan, emit, notify, companies });
+  manager = new CampaignManager({ store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir: path.join(app.getPath('userData'), 'resumes', 'tailored') });
   manager.settings = () => getSettings();
+  cloud = new CloudSync({ store, manager, emit, notify, encrypt: enc, decrypt: dec, log: (m) => console.log(m), deviceName: `ApplyPilot desktop — ${os.hostname()}` });
+  cloud.start();
+  setTimeout(() => cloud.syncNow().catch(() => {}), 8000);
   registerIpc();
   createWindow();
   createTray();
@@ -457,6 +613,8 @@ app.whenReady().then(() => {
   resumeLib.migrateResumes(store).then(() => emit('resumes:changed', store.resumes.get().items.map((r) => r.id))).catch(() => {});
   setTimeout(() => manager.resumeAll(), 4000);
   setInterval(followUpTick, 60 * 60 * 1000);
+  setInterval(digestTick, 15 * 60 * 1000);
+  setTimeout(digestTick, 60000);
   setTimeout(followUpTick, 30000);
   // Online license re-validation (keeps a 14-day offline grace window).
   license.revalidate(store.license.get()).then((patch) => { if (Object.keys(patch).length) store.license.update((d) => Object.assign(d, patch)); emit('plan', getPlan()); });
@@ -468,7 +626,7 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+app.on('second-instance', () => windowFit.reveal(win));
 app.on('before-quit', () => { quitting = true; try { manager && manager.stopAll(); } catch {} try { store && store.flushAll(); } catch {} });
 app.on('will-quit', async () => { try { engine && engine.close && (await engine.close()); } catch {} });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

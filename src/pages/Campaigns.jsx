@@ -56,6 +56,9 @@ export function CampaignEditor({ open, onClose, initial }) {
               {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </Field>
+          <Field label="Tailor resume per job" help="AI rewrites your resume for each job using only facts already in it; anything it invents is removed automatically.">
+            <Seg value={c.tailorResume ? 'on' : 'off'} onChange={(v) => up('tailorResume')(v === 'on')} options={[{ value: 'off', label: 'Use as-is' }, { value: 'on', label: 'AI-tailor (needs key)' }]} />
+          </Field>
           <Field label="Cover letters">
             <Seg value={c.coverLetter} onChange={up('coverLetter')} options={[{ value: 'ai', label: 'AI-personalised' }, { value: 'template', label: 'My template' }, { value: 'none', label: 'None' }]} />
           </Field>

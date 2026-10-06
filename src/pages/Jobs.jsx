@@ -18,7 +18,7 @@ export default function Jobs({ params }) {
   const [progress, setProgress] = useState([]);
   const [stats, setStats] = useState(null);
   const [open, setOpen] = useState(null);
-  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, days: 0, hideApplied: true, source: 'all', text: '' });
+  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, visa: false, eligible: true, days: 0, hideApplied: true, source: 'all', text: '' });
   const [sort, setSort] = useState('score');
   const searchId = useRef(null);
   const free = app.connectors.filter((c) => c.ready);
@@ -45,6 +45,8 @@ export default function Jobs({ params }) {
     let l = jobs.filter((j) => (j.match?.score || 0) >= f.minScore
       && (!f.autoOnly || AUTO_ATS.includes(j.ats))
       && (!f.hasSalary || j.salaryMin || j.salaryMax || j.salaryText)
+      && (!f.visa || (j.match && j.match.sponsorship === 'offered'))
+      && (!f.eligible || !j.match || !j.match.eligibility || j.match.eligibility.ok)
       && (!f.days || (j.postedAt && Date.now() - new Date(j.postedAt) < f.days * 86400000))
       && (!f.hideApplied || !j.appStatus || j.appStatus === 'saved')
       && (f.source === 'all' || j.source === f.source)
@@ -93,7 +95,7 @@ export default function Jobs({ params }) {
         )}
       </AnimatePresence>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 24, alignItems: 'start' }}>
+      <div className="jobs-layout" style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 24, alignItems: 'start' }}>
         <div className="sticky">
           <div className="label" style={{ marginBottom: 12 }}>Filters</div>
           <div className="card pad col" style={{ gap: 18 }}>
@@ -117,6 +119,8 @@ export default function Jobs({ params }) {
             </div>
             <label className="row between small"><span>Auto-apply capable</span><Switch on={f.autoOnly} onChange={(v) => setF({ ...f, autoOnly: v })} /></label>
             <label className="row between small"><span>Shows salary</span><Switch on={f.hasSalary} onChange={(v) => setF({ ...f, hasSalary: v })} /></label>
+            <label className="row between small" title="Only jobs whose posting says visa sponsorship is available"><span>Sponsors visa</span><Switch on={f.visa} onChange={(v) => setF({ ...f, visa: v })} /></label>
+            <label className="row between small" title="Hides likely scams, postings in languages you don't speak, and remote jobs restricted to other countries"><span>Only jobs I can take</span><Switch on={f.eligible} onChange={(v) => setF({ ...f, eligible: v })} /></label>
             <label className="row between small"><span>Hide applied</span><Switch on={f.hideApplied} onChange={(v) => setF({ ...f, hideApplied: v })} /></label>
           </div>
           <div className="card pad" style={{ marginTop: 14 }}>

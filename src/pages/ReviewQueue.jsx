@@ -16,6 +16,9 @@ export default function ReviewQueue() {
   const queued = useMemo(() => app.applications.filter((a) => a.status === 'queued' && (camp === 'all' || a.campaignId === camp)).sort((a, b) => (b.score || 0) - (a.score || 0)), [app.applications, camp]);
   const queuedCampaigns = useMemo(() => [...new Set(app.applications.filter((a) => a.status === 'queued').map((a) => a.campaignId))].map((id) => app.campaigns.find((c) => c.id === id) || { id, name: 'Manual' }), [app.applications, app.campaigns]);
   const pendingQ = app.qa.filter((q) => !q.answer).length;
+  const [, tick] = useState(0);
+  const submitting = app.applications.filter((a) => a.pendingSubmitUntil && new Date(a.pendingSubmitUntil) > new Date());
+  React.useEffect(() => { if (!submitting.length) return undefined; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [submitting.length]);
 
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const approve = async (ids) => {
@@ -38,6 +41,25 @@ export default function ReviewQueue() {
           <div className="row"><MessageSquareText size={18} color="var(--accent-2)" /><span><b>{pendingQ} new screening question{pendingQ > 1 ? 's' : ''}</b> <span className="muted">— answer once and ApplyPilot remembers forever.</span></span></div>
           <Button size="sm" variant="primary" onClick={() => app.go('qa')}>Answer now</Button>
         </motion.div>
+      )}
+
+      {submitting.length > 0 && (
+        <section style={{ marginBottom: 28 }}>
+          <div className="section-title"><Zap size={14} color="var(--green)" />About to submit ({submitting.length})</div>
+          <div className="col">
+            {submitting.map((a) => (
+              <motion.div key={a.id} layout className="card pad row premium premium-shimmer" style={{ gap: 14 }}>
+                <Logo name={a.job.company} src={a.job.companyLogo} size="sm" />
+                <div className="grow" style={{ position: 'relative', zIndex: 2 }}>
+                  <div style={{ fontWeight: 700 }} className="ellipsis">{a.job.title} <span className="muted" style={{ fontWeight: 400 }}>· {a.job.company}</span></div>
+                  <div className="small muted">Every field is filled. Submitting in <b style={{ color: 'var(--fg)' }}>{Math.max(0, Math.ceil((new Date(a.pendingSubmitUntil) - Date.now()) / 1000))}s</b></div>
+                </div>
+                <Button size="sm" style={{ position: 'relative', zIndex: 2 }} onClick={() => app.run('applications:hold', [a.id], "Held — it's waiting for you in the browser")}>Hold, I'll review</Button>
+                <Button size="sm" variant="primary" style={{ position: 'relative', zIndex: 2 }} onClick={() => app.run('applications:submitNow', [a.id])}>Submit now</Button>
+              </motion.div>
+            ))}
+          </div>
+        </section>
       )}
 
       {needs.length > 0 && (

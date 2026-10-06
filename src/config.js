@@ -12,6 +12,7 @@ export const CONFIG = {
     lifetime: '',
   },
   customerPortal: '', // Dodo customer portal link for one-click cancel
+  cloudUrl: 'https://app.applypilot.app', // where you deploy web/ (see web/README.md); localhost works for testing
 };
 
 export const PRICING = [

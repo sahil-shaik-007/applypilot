@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
   humanDelays: true,
   maxParallelBrowsers: 3,
   defaultApplyMode: 'review',
+  submitDelaySeconds: 30, // cancel window before every auto-submit
   dailyApplyLimit: 40,
   minMatchScore: 55,
   enabledSources: null, // null = all free sources
@@ -68,6 +69,8 @@ function createStore(baseDir) {
     activity: c('activity', { items: [] }),
     license: c('license', { key: null }),
     platforms: c('platform-usage', { used: {} }),
+    network: c('network', { items: [], importedAt: null }), // LinkedIn connections (local only)
+    cloud: c('cloud', {}), // phone/web sync link (token + data key are DPAPI-encrypted)
   };
   // Make sure new default settings keys appear after upgrades.
   store.settings.data = { ...DEFAULT_SETTINGS, ...store.settings.data, keys: { ...(store.settings.data.keys || {}) } };

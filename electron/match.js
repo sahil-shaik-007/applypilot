@@ -95,6 +95,8 @@ function yearsRequired(desc) {
 const SENIOR = /\b(senior|sr\.?|staff|principal|lead|head|director|vp|architect)\b/i;
 const JUNIOR = /\b(intern|internship|junior|jr\.?|graduate|fresher|entry[- ]level|trainee|associate)\b/i;
 
+const { eligibility } = require('./eligibility');
+
 const SOFT = new Set(['communication', 'leadership', 'stakeholder management', 'operations', 'research', 'documentation', 'reporting']);
 
 function ghostSignals(job) {
@@ -111,6 +113,18 @@ function ghostSignals(job) {
 /**
  * @returns {score, breakdown: {...}, matchedSkills, missingSkills, reasons, flags}
  */
+
+// Visa sponsorship signal from the job text: 'offered' | 'not-offered' | null (unknown).
+const SPONSOR_NO = /\b(no|not|unable to|cannot|can't|can ?not|will not|won't|do not|does not|don't|doesn't|are not able to)\s+(currently\s+)?(be\s+)?(able to\s+)?(provide|offer|support|sponsor)(ing)?\s+(any\s+)?(visa|h-?1b|work (permit|authori[sz]ation)|sponsorship|immigration)|\bsponsorship\s+(is\s+)?(not|unavailable)|\bwithout\s+(the\s+need\s+for\s+)?(current\s+or\s+future\s+)?(visa\s+)?sponsorship|\bno\s+(visa\s+)?sponsorship\b|\bnot\s+eligible\s+for\s+(visa\s+)?sponsorship/i;
+const SPONSOR_YES = /\b(visa|h-?1b|work permit|immigration|relocation and visa)\s+(sponsorship|support|assistance)\s+(is\s+)?(available|provided|offered|possible|included)|\bwe\s+(can|will|do|are able to)\s+sponsor\b|\bsponsorship\s+(is\s+)?(available|provided|offered|possible)|\bopen to sponsor(ing)?\b|\b(offer|offers|provide|provides|include|includes)\s+(full\s+)?(relocation\s+(and|&)\s+)?(visa|immigration)\s+(support|sponsorship|assistance)|\bvisa sponsorship\b(?![^.]{0,40}\b(not|no|unable|cannot)\b)/i;
+function sponsorshipSignal(job) {
+  const t = `${job.title || ''}\n${job.description || ''}`;
+  if (SPONSOR_NO.test(t)) return 'not-offered';
+  if (SPONSOR_YES.test(t)) return 'offered';
+  return null;
+}
+const needsVisa = (profile) => String(profile.needsSponsorship || '').toLowerCase() === 'yes';
+
 function scoreJob(job, { resumeText = '', profile = {}, campaign = {} } = {}) {
   const targets = [...(campaign.roles || []), ...(profile.desiredTitles || [])];
   const jobText = `${job.title}\n${job.description || ''}\n${(job.tags || []).join(' ')}`;
@@ -145,24 +159,34 @@ function scoreJob(job, { resumeText = '', profile = {}, campaign = {} } = {}) {
     fresh = d <= 3 ? 1 : d <= 7 ? 0.85 : d <= 14 ? 0.7 : d <= 30 ? 0.5 : 0.25;
   }
 
-  const score = Math.round(100 * (0.32 * tFit + 0.33 * Math.min(1, sFit) + 0.15 * eFit + 0.12 * lFit + 0.08 * fresh));
+  let score = Math.round(100 * (0.32 * tFit + 0.33 * Math.min(1, sFit) + 0.15 * eFit + 0.12 * lFit + 0.08 * fresh));
+  const sponsorship = sponsorshipSignal(job);
+  const elig = eligibility(job, profile);
+  if (needsVisa(profile) && sponsorship === 'not-offered') score = Math.max(0, score - 30);
   const reasons = [];
   if (tFit >= 0.99) reasons.push('Title matches your target role');
   else if (tFit >= 0.5) reasons.push('Title partially matches your target role');
   if (matched.length) reasons.push(`${matched.length} of ${jobSkills.length} detected skills match`);
   if (req != null) reasons.push(`Asks for ~${req}+ yrs (you: ${Number.isNaN(yrs) ? '?' : yrs})`);
   if (job.remote) reasons.push('Remote-friendly');
+  if (sponsorship === 'offered') reasons.push('Visa sponsorship offered');
+  if (sponsorship === 'not-offered') reasons.push(needsVisa(profile) ? "Doesn't sponsor visas (you need sponsorship)" : 'No visa sponsorship');
   return {
     score: Math.max(0, Math.min(100, score)),
     breakdown: { title: tFit, skills: Math.min(1, sFit), experience: eFit, location: lFit, freshness: fresh },
     matchedSkills: matched.map(displaySkill),
     missingSkills: missing.filter((m) => !SOFT.has(m)).slice(0, 15).map(displaySkill),
     reasons,
-    flags: ghostSignals(job),
+    flags: [...ghostSignals(job), ...elig.blockers],
+    sponsorship,
+    eligibility: elig,
   };
 }
 
 function isExcluded(job, { profile = {}, campaign = {} } = {}) {
+  const el = eligibility(job, profile);
+  if (!el.ok) return el.blockers[0];
+  if (needsVisa(profile) && sponsorshipSignal(job) === 'not-offered' && campaign.skipNoSponsorship !== false) return "Employer doesn't sponsor visas";
   const companies = [...(profile.excludeCompanies || []), ...(campaign.excludeCompanies || [])].map((s) => s.toLowerCase().trim()).filter(Boolean);
   if (companies.some((c) => (job.company || '').toLowerCase().includes(c))) return 'Company is on your exclude list';
   const kws = [...(profile.excludeKeywords || []), ...(campaign.excludeKeywords || [])].map((s) => s.toLowerCase().trim()).filter(Boolean);
@@ -172,4 +196,4 @@ function isExcluded(job, { profile = {}, campaign = {} } = {}) {
   return null;
 }
 
-module.exports = { scoreJob, extractSkills, isExcluded, displaySkill, SKILLS };
+module.exports = { scoreJob, extractSkills, isExcluded, displaySkill, sponsorshipSignal, SKILLS };

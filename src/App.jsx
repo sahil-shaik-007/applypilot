@@ -55,7 +55,7 @@ export default function App() {
           <div>ApplyPilot<small>autopilot for job hunting</small></div>
         </div>
         {NAV.map((n, i) => (n.group ? <div className="nav-label" key={i}>{n.group}</div> : (
-          <button key={n.id} className={`nav-item ${current.id === n.id ? 'active' : ''}`} onClick={() => app.go(n.id)}>
+          <button key={n.id} title={n.label} className={`nav-item ${current.id === n.id ? 'active' : ''}`} onClick={() => app.go(n.id)}>
             {current.id === n.id && <motion.div layoutId="nav-bg" className="nav-bg" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />}
             <n.icon size={16} />
             <span>{n.label}</span>

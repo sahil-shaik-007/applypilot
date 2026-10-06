@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser } from 'lucide-react';
+import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser, Mail, Upload, FileText } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS } from '../components/ui';
 
@@ -18,8 +18,9 @@ function AppDrawer({ a, onClose }) {
   const app = useApp();
   const [notes, setNotes] = useState(a ? a.notes || '' : '');
   const [prep, setPrep] = useState(null);
+  const [follow, setFollow] = useState(null);
   const [busy, setBusy] = useState(false);
-  React.useEffect(() => { setNotes(a ? a.notes || '' : ''); setPrep(null); }, [a && a.id]); // eslint-disable-line
+  React.useEffect(() => { setNotes(a ? a.notes || '' : ''); setPrep(null); setFollow(null); }, [a && a.id]); // eslint-disable-line
   if (!a) return <Drawer open={false} onClose={onClose} />;
   const update = (patch, msg) => app.run('applications:update', [a.id, patch], msg);
   return (
@@ -74,10 +75,24 @@ function AppDrawer({ a, onClose }) {
             <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{a.unanswered.map((q, i) => <li key={i}>{q.question}{q.required ? ' *' : ''}</li>)}</ul>
           </div>
         )}
+        {a.tailored && (
+          <div className="card pad row between">
+            <div><div className="section-title" style={{ margin: 0 }}>Tailored resume</div><div className="small muted">{a.tailored.fileName}{a.tailored.removed && a.tailored.removed.length ? ` · ${a.tailored.removed.length} unsupported claim(s) removed` : ''}</div></div>
+            <Button size="sm" icon={ExternalLink} onClick={() => app.run('shell:openPath', [a.tailored.path])}>Open PDF</Button>
+          </div>
+        )}
         {a.coverLetter && <div className="card pad"><div className="section-title">Cover letter sent</div><div className="small prewrap">{a.coverLetter}</div></div>}
+        {['applied', 'interview'].includes(a.status) && (
+          <div className="card pad">
+            <div className="row between"><div className="section-title" style={{ margin: 0 }}>Follow-up email</div>
+              <Button size="sm" icon={Mail} loading={busy === 'follow'} onClick={async () => { setBusy('follow'); try { setFollow(await app.run('ai:followUp', [a.id])); } catch {} finally { setBusy(false); } }}>{follow ? 'Rewrite' : 'Write it for me'}</Button></div>
+            {follow && <><div className="small prewrap" style={{ marginTop: 10 }}>{follow}</div><Button size="sm" variant="ghost" style={{ marginTop: 8 }} onClick={() => { navigator.clipboard.writeText(follow); app.toast('Copied', 'success'); }}>Copy</Button></>}
+            {!follow && <div className="small dim" style={{ marginTop: 6 }}>A short, polite nudge after ~7 days roughly doubles reply rates.</div>}
+          </div>
+        )}
         <div className="card pad">
           <div className="row between"><div className="section-title" style={{ margin: 0 }}>Interview prep</div>
-            <Button size="sm" icon={GraduationCap} loading={busy} onClick={async () => { setBusy(true); try { setPrep(await app.run('ai:interviewPrep', [a.jobId, a.resumeId])); } catch {} finally { setBusy(false); } }}>Generate</Button></div>
+            <Button size="sm" icon={GraduationCap} loading={busy === 'prep'} onClick={async () => { setBusy('prep'); try { setPrep(await app.run('ai:interviewPrep', [a.jobId, a.resumeId])); } catch {} finally { setBusy(false); } }}>Generate</Button></div>
           {prep && <div style={{ marginTop: 10 }}><Markdown text={prep} /></div>}
         </div>
         <div className="card pad">
@@ -129,7 +144,9 @@ export default function Applications() {
         <div className="row">
           <input className="input" style={{ width: 220 }} placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
           <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Board' }, { value: 'table', label: 'Table' }]} />
+          <Button icon={Upload} title="Import from Teal, Huntr, Simplify or any spreadsheet CSV" onClick={async () => { try { const r = await app.run('applications:import'); if (r) { app.set({ applications: r.applications }); app.toast(`Imported ${r.added} application(s)${r.skipped ? `, ${r.skipped} duplicate(s) skipped` : ''}`, 'success'); } } catch {} }}>Import</Button>
           <Button icon={Download} onClick={() => app.run('data:exportCsv', [], 'Exported')}>CSV</Button>
+          <Button icon={FileText} title="Dated log of every application (e.g. for unemployment-benefit work-search requirements)" onClick={async () => { const r = await app.run('data:exportWorkLog', [null]); if (r) app.toast(`Work-search log saved (${r.count} applications, last 4 weeks)`, 'success'); }}>Work log</Button>
         </div>
       </div>
       {followUps.length > 0 && (

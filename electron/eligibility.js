@@ -1,0 +1,147 @@
+// Hard eligibility checks that run before any personal data leaves the machine:
+// scam detection, posting language, and remote-region restrictions.
+
+// ---------------------------------------------------------------- scams
+const SCAM_TEXT = [
+  [/\b(registration|processing|training|onboarding|security|application|joining|kit)\s+(fee|charges?|deposit)\b/i, 'asks for a fee'],
+  [/\b(pay|send|transfer)\s+(us\s+)?(a\s+|the\s+)?(refundable\s+)?(deposit|fee|money|payment)\b/i, 'asks you to pay'],
+  [/\b(western union|moneygram|gift cards?|itunes cards?)\b/i, 'unusual payment method'],
+  [/\b(paid|payment|salary)\s+(in|via|through)\s+(bitcoin|crypto(currency)?|usdt)\b/i, 'pays in crypto'],
+  [/\b(contact|message|text|reach)\s+(us|me|the recruiter|hr)?\s*(on|via)\s+(whats ?app|telegram|signal)\b|\bwa\.me\/|\bt\.me\//i, 'recruiting over WhatsApp/Telegram'],
+  [/\bearn\s+(up to\s+)?(\$|rs\.?|₹|inr\s?)\s?[\d,]{3,}\s*(\+\s*)?(per|a|\/)\s*(day|week)\b/i, 'promises daily/weekly earnings'],
+  [/\b(no (experience|interview) (needed|required)).{0,80}\b(earn|income|\$|₹)/i, 'no-experience easy-money pitch'],
+  [/\b(cheque|check)\s+(to\s+)?(purchase|buy)\s+(equipment|software|supplies)\b/i, 'equipment-cheque scheme'],
+  [/\b(share|send)\s+(your\s+)?(aadhaar|pan card|bank (account|details)|otp|ssn|social security)\b/i, 'asks for ID/bank details up front'],
+];
+const SCAM_URL = /^https?:\/\/(?:www\.)?(forms\.gle|docs\.google\.com\/forms|bit\.ly|tinyurl\.com|t\.me|telegram\.me|wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com|linktr\.ee|cutt\.ly|rb\.gy|shorturl\.at)\b/i;
+
+/** @returns {string[]} human-readable scam reasons (empty when nothing suspicious). */
+function scamSignals(job) {
+  const text = `${job.title || ''}\n${job.description || ''}`;
+  const out = [];
+  for (const [re, why] of SCAM_TEXT) if (re.test(text)) out.push(why);
+  const url = job.applyUrl || job.url || '';
+  if (SCAM_URL.test(url)) out.push('application link is a shortener / chat / generic form');
+  if (/@(gmail|yahoo|hotmail|outlook|rediffmail)\.com\b/i.test(text) && /\b(send|email|mail)\b.{0,40}\b(cv|resume)\b/i.test(text)) out.push('asks for your CV at a personal email address');
+  return [...new Set(out)];
+}
+
+// ---------------------------------------------------------------- language
+const STOPWORDS = {
+  en: ['the', 'and', 'to', 'of', 'with', 'you', 'for', 'our', 'we', 'will', 'your', 'in', 'is', 'are', 'experience'],
+  de: ['und', 'der', 'die', 'das', 'mit', 'für', 'wir', 'sie', 'ist', 'eine', 'ein', 'auf', 'bei', 'zu', 'erfahrung'],
+  fr: ['et', 'le', 'la', 'les', 'des', 'pour', 'nous', 'vous', 'avec', 'une', 'est', 'dans', 'sur', 'expérience'],
+  es: ['y', 'el', 'la', 'los', 'las', 'para', 'con', 'una', 'nuestro', 'experiencia', 'del', 'por', 'que'],
+  pt: ['e', 'o', 'os', 'as', 'para', 'com', 'uma', 'você', 'nossa', 'experiência', 'do', 'da', 'que'],
+  nl: ['en', 'de', 'het', 'een', 'voor', 'met', 'wij', 'jij', 'je', 'van', 'ervaring', 'naar'],
+  pl: ['i', 'w', 'na', 'z', 'do', 'dla', 'oraz', 'się', 'jest', 'doświadczenie', 'nasz'],
+  it: ['e', 'il', 'la', 'per', 'con', 'una', 'del', 'della', 'che', 'esperienza', 'nostro'],
+};
+const LANG_NAMES = { en: 'English', de: 'German', fr: 'French', es: 'Spanish', pt: 'Portuguese', nl: 'Dutch', pl: 'Polish', it: 'Italian' };
+
+/** Very small stop-word language guesser. Returns a code from STOPWORDS or null when unsure. */
+function detectLanguage(text) {
+  const words = String(text || '').toLowerCase().split(/[^a-zà-ÿąćęłńóśźż]+/).filter(Boolean);
+  if (words.length < 40) return null;
+  const counts = {};
+  for (const [lang, list] of Object.entries(STOPWORDS)) {
+    const set = new Set(list);
+    counts[lang] = words.filter((w) => set.has(w)).length;
+  }
+  const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const [best, n] = ranked[0];
+  if (n < 6 || n < ranked[1][1] * 1.4) return null;
+  return best;
+}
+
+/** Language codes the candidate can work in (English always included). */
+function spokenLanguages(profile = {}) {
+  const out = new Set(['en']);
+  for (const l of profile.languages || []) {
+    const name = String(l).toLowerCase();
+    for (const [code, label] of Object.entries(LANG_NAMES)) if (name.includes(label.toLowerCase())) out.add(code);
+    if (/deutsch/.test(name)) out.add('de');
+    if (/français|francais/.test(name)) out.add('fr');
+    if (/español|espanol/.test(name)) out.add('es');
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- remote regions
+const REGIONS = {
+  US: ['united states', 'usa', 'u\\.s\\.', 'us'],
+  CA: ['canada'],
+  UK: ['united kingdom', 'uk', 'england', 'great britain', 'britain'],
+  IN: ['india'],
+  EU: ['europe', 'european union', 'eu', 'emea', 'cet', 'cest'],
+  LATAM: ['latin america', 'latam', 'south america'],
+  APAC: ['apac', 'asia', 'asia pacific', 'asia-pacific'],
+  AU: ['australia', 'new zealand', 'anz'],
+};
+const EU_COUNTRIES = ['germany', 'france', 'spain', 'italy', 'netherlands', 'poland', 'portugal', 'ireland', 'belgium', 'austria', 'sweden', 'denmark', 'finland', 'norway', 'switzerland', 'czech', 'romania', 'greece', 'hungary'];
+const LATAM_COUNTRIES = ['brazil', 'mexico', 'argentina', 'colombia', 'chile', 'peru', 'uruguay'];
+const APAC_COUNTRIES = ['india', 'singapore', 'philippines', 'indonesia', 'malaysia', 'vietnam', 'japan', 'australia', 'new zealand', 'pakistan', 'bangladesh', 'sri lanka'];
+
+// Phrases like "must be based in the US", "Remote (US only)", "UK-based candidates only".
+const RESTRICT_PATTERNS = [
+  /\b(?:only|must|need to|required to|should)\s+(?:be\s+)?(?:currently\s+)?(?:based|located|living|residing|reside|live)\s+(?:in|within)\s+(?:the\s+)?([a-z .,&/-]{2,50})/gi,
+  /\bremote\s*[(\-–—:]\s*([a-z .&/-]{2,30}?)\s*(?:only|based)\b/gi,
+  /\b([a-z .&/-]{2,25}?)\s*[- ]based\s+candidates\s+only\b/gi,
+  /\bopen\s+to\s+candidates\s+(?:based\s+)?in\s+([a-z .,&/-]{2,50})\s+only\b/gi,
+  /\bremote\s*\(\s*([a-z .&/-]{2,30})\s*\)/gi,
+];
+
+function regionsIn(fragment) {
+  const f = ` ${String(fragment).toLowerCase()} `;
+  const hits = new Set();
+  for (const [code, names] of Object.entries(REGIONS)) {
+    if (names.some((n) => new RegExp(`(^|[^a-z])${n}([^a-z]|$)`).test(f))) hits.add(code);
+  }
+  if (EU_COUNTRIES.some((c) => f.includes(c))) hits.add('EU');
+  if (LATAM_COUNTRIES.some((c) => f.includes(c))) hits.add('LATAM');
+  return hits;
+}
+
+/** Regions a remote job is restricted to (Set of codes), or null when unrestricted/unknown. */
+function remoteRestriction(job) {
+  if (!job.remote) return null;
+  const text = `${job.location || ''}\n${job.title || ''}\n${job.description || ''}`.slice(0, 6000);
+  if (/\b(anywhere in the world|worldwide|globally remote|work from anywhere|all countries)\b/i.test(text)) return null;
+  const out = new Set();
+  for (const re of RESTRICT_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) regionsIn(m[1]).forEach((r) => out.add(r));
+  }
+  // Location field such as "Remote - US" / "US (Remote)".
+  const loc = String(job.location || '').toLowerCase();
+  if (/remote/.test(loc) && !/(anywhere|worldwide|global)/.test(loc)) regionsIn(loc.replace(/remote/g, ' ')).forEach((r) => out.add(r));
+  return out.size ? out : null;
+}
+
+function userRegions(country = '') {
+  const c = String(country).toLowerCase().trim();
+  if (!c) return null;
+  const out = regionsIn(c);
+  if (out.has('UK')) out.add('EU'); // most "Europe/EMEA" roles include the UK
+  if (APAC_COUNTRIES.some((x) => c.includes(x))) out.add('APAC');
+  return out.size ? out : null;
+}
+
+/**
+ * Overall eligibility for one job and candidate.
+ * @returns {{ ok: boolean, blockers: string[], scam: string[], language: string|null, regions: string[]|null }}
+ */
+function eligibility(job, profile = {}) {
+  const blockers = [];
+  const scam = scamSignals(job);
+  if (scam.length) blockers.push(`Possible scam: ${scam.join(', ')}`);
+  const language = detectLanguage(job.description);
+  if (language && !spokenLanguages(profile).has(language)) blockers.push(`Posting is in ${LANG_NAMES[language]}`);
+  const restricted = remoteRestriction(job);
+  const mine = userRegions(profile.country);
+  if (restricted && mine && ![...restricted].some((r) => mine.has(r))) blockers.push(`Remote only for candidates in ${[...restricted].join('/')}`);
+  return { ok: !blockers.length, blockers, scam, language, regions: restricted ? [...restricted] : null };
+}
+
+module.exports = { eligibility, scamSignals, detectLanguage, remoteRestriction, userRegions, spokenLanguages, LANG_NAMES };

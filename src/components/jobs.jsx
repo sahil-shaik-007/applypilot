@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Clock, ExternalLink, Bookmark, BookmarkX, Send, Wand2, Zap, Sparkles, Copy, FileText, MessageSquareText, GraduationCap, ShieldCheck, CircleAlert } from 'lucide-react';
+import { ShieldAlert, Plane, Users, Building2, Newspaper, MessagesSquare, Star as StarIcon, Banknote, MapPin, Clock, ExternalLink, Bookmark, BookmarkX, Send, Wand2, Zap, Sparkles, Copy, FileText, MessageSquareText, GraduationCap, ShieldCheck, CircleAlert } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, ScoreRing, StatusBadge, Markdown, Seg, timeAgo, salary, stagger } from './ui';
 
@@ -15,6 +15,7 @@ export function JobCard({ job, onOpen, index = 0 }) {
     <motion.div {...stagger(index)} className={`card clickable ${top ? 'premium premium-shimmer' : ''}`} onClick={() => onOpen(job)} style={{ overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: 6, padding: '6px 8px', zIndex: 2 }}>
         {AUTO_ATS.includes(job.ats) && <span className="badge green" title="ApplyPilot can fill this form automatically"><Zap size={10} />auto-apply</span>}
+        {job.match && job.match.sponsorship === 'offered' && <span className="badge blue" title="The posting says visa sponsorship is available"><Plane size={10} />visa</span>}
         {job.appStatus && <StatusBadge status={job.appStatus} />}
       </div>
       <div style={{ padding: 18, position: 'relative', zIndex: 2 }}>
@@ -63,6 +64,9 @@ export function JobDrawer({ job, onClose }) {
   const [busy, setBusy] = useState(null);
   const [aiOut, setAiOut] = useState({});
   const application = useMemo(() => job && app.applications.find((a) => a.jobId === job.id), [job, app.applications]);
+  const [market, setMarket] = useState(null);
+  const [people, setPeople] = useState(null);
+  useEffect(() => { setMarket(null); setPeople(null); if (job) { app.run('insights:salary', [job.id]).then(setMarket).catch(() => {}); app.run('network:forCompany', [job.company]).then(setPeople).catch(() => {}); } }, [job && job.id]); // eslint-disable-line
   if (!job) return <Drawer open={false} onClose={onClose} />;
   const m = job.match;
   const canAuto = AUTO_ATS.includes(job.ats);
@@ -123,9 +127,47 @@ export function JobDrawer({ job, onClose }) {
               {(m.matchedSkills.length > 0 || m.missingSkills.length > 0) && <hr className="hr" />}
               {m.matchedSkills.length > 0 && <div className="chips" style={{ marginBottom: 8 }}>{m.matchedSkills.map((s) => <span key={s} className="badge green">✓ {s}</span>)}</div>}
               {m.missingSkills.length > 0 && <div className="chips">{m.missingSkills.map((s) => <span key={s} className="badge amber">+ {s}</span>)}</div>}
-              {m.flags && m.flags.length > 0 && <div className="row small" style={{ marginTop: 12, color: 'var(--amber)' }}><CircleAlert size={14} />{m.flags.join(' · ')}</div>}
+              {m.eligibility && !m.eligibility.ok && <div className="row small" style={{ marginTop: 12, color: 'var(--red)', alignItems: 'flex-start' }}><ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} /><span><b>Not a fit:</b> {m.eligibility.blockers.join(' · ')}{m.eligibility.scam.length ? ' — ApplyPilot will not send your details to this posting.' : ''}</span></div>}
+              {m.flags && m.flags.filter((x) => !(m.eligibility && m.eligibility.blockers.includes(x))).length > 0 && <div className="row small" style={{ marginTop: 12, color: 'var(--amber)' }}><CircleAlert size={14} />{m.flags.filter((x) => !(m.eligibility && m.eligibility.blockers.includes(x))).join(' · ')}</div>}
             </div>
           )}
+          {market && market.median && (
+            <div className="card pad row" style={{ gap: 14 }}>
+              <Banknote size={18} color="var(--green)" />
+              <div className="grow">
+                <div className="label" style={{ margin: 0 }}>Market pay for similar roles</div>
+                <div style={{ fontWeight: 700 }}>{salary({ salaryMin: market.p25, salaryMax: market.p75, salaryCurrency: market.currency })} <span className="small muted">· median {salary({ salaryMin: market.median, salaryCurrency: market.currency })}</span></div>
+                <div className="tiny dim">From {market.count} similar jobs ApplyPilot has seen (25th–75th percentile). Use it to set your expected salary.</div>
+              </div>
+            </div>
+          )}
+          <div className="card pad">
+            <div className="section-title"><Users size={14} />Research & referrals</div>
+            {people && people.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div className="small" style={{ fontWeight: 700, color: 'var(--green)', marginBottom: 6 }}>You know {people.length} {people.length === 1 ? 'person' : 'people'} at {job.company}</div>
+                <div className="col" style={{ gap: 4 }}>
+                  {people.slice(0, 6).map((p) => (
+                    <div key={p.url || p.name} className="row small" style={{ gap: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{p.name}</span><span className="muted ellipsis grow">{p.position}</span>
+                      {p.url && <a href="#" onClick={(e) => { e.preventDefault(); app.run('shell:open', [p.url]); }}>Profile ↗</a>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="chips">
+              {[
+                ['People at ' + job.company, `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${job.company} ${(job.title || '').split(/[,(-]/)[0]}`)}`, Users],
+                ['Company page', `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(job.company)}`, Building2],
+                ['Reviews (Glassdoor)', `https://www.google.com/search?q=${encodeURIComponent(`${job.company} reviews site:glassdoor.com`)}`, StarIcon],
+                ['Reviews (AmbitionBox)', `https://www.google.com/search?q=${encodeURIComponent(`${job.company} reviews site:ambitionbox.com`)}`, StarIcon],
+                ['Interview questions', `https://www.google.com/search?q=${encodeURIComponent(`${job.company} ${job.title} interview questions`)}`, MessagesSquare],
+                ['Latest news', `https://news.google.com/search?q=${encodeURIComponent(job.company)}`, Newspaper],
+              ].map(([label, url, Icon]) => <span key={label} className="chip" onClick={() => app.run('shell:open', [url])}><Icon size={12} />{label}</span>)}
+            </div>
+            <div className="tiny dim" style={{ marginTop: 8 }}>{people && people.length ? 'Ask one of them for a referral — AI tools → "Ask for a referral" writes the message.' : <>A referral makes you several times more likely to get an interview. <a href="#" onClick={(e) => { e.preventDefault(); onClose(); app.go('settings', { tab: 'network' }); }}>Import your LinkedIn connections</a> to see who you already know here.</>}</div>
+          </div>
           <div className="row wrap" style={{ gap: 6 }}>
             {canAuto ? <span className="badge green"><Zap size={11} />ApplyPilot fills this {job.ats} form automatically</span>
               : <span className="badge amber"><ShieldCheck size={11} />Assisted apply: we fill, you click submit</span>}
@@ -174,17 +216,34 @@ export function JobDrawer({ job, onClose }) {
           {!app.settings.keys.anthropic && <div className="card pad small" style={{ borderColor: 'rgba(251,191,36,.3)' }}>Add your Anthropic API key in <a href="#" onClick={(e) => { e.preventDefault(); onClose(); app.go('settings', { tab: 'ai' }); }}>Settings → AI</a> to unlock these tools.</div>}
           <div className="grid g2">
             <Button icon={Sparkles} loading={busy === 'tailor'} onClick={() => ai('tailor', 'ai:tailor', [job.id, resumeId])}>ATS check & tailor resume</Button>
+            <Button variant="primary" icon={FileText} loading={busy === 'pdf'} onClick={() => ai('pdf', 'resume:tailor', [job.id, resumeId])}>Tailored resume PDF</Button>
             <Button icon={FileText} loading={busy === 'cover'} onClick={() => ai('cover', 'ai:coverLetter', [job.id, resumeId])}>Write cover letter</Button>
             <Button icon={GraduationCap} loading={busy === 'prep'} onClick={() => ai('prep', 'ai:interviewPrep', [job.id, resumeId])}>Interview prep pack</Button>
             <Button icon={MessageSquareText} loading={busy === 'outreach'} onClick={() => ai('outreach', 'ai:outreach', [job.id, 'recruiter'])}>Message the recruiter</Button>
+            <Button icon={Users} loading={busy === 'referral'} onClick={() => ai('referral', 'ai:outreach', [job.id, 'referral'])}>Ask for a referral</Button>
           </div>
+          {aiOut.pdf && <TailoredPdfResult r={aiOut.pdf} />}
           {aiOut.tailor && <TailorResult r={aiOut.tailor} />}
           {aiOut.cover && <TextResult title="Cover letter" text={aiOut.cover} />}
           {aiOut.outreach && <TextResult title="Recruiter message" text={aiOut.outreach} />}
+          {aiOut.referral && <TextResult title="Referral request" text={aiOut.referral} />}
           {aiOut.prep && <div className="card pad"><div className="section-title">Interview prep</div><Markdown text={aiOut.prep} /></div>}
         </div>
       )}
     </Drawer>
+  );
+}
+
+export function TailoredPdfResult({ r }) {
+  const app = useApp();
+  return (
+    <motion.div className="card pad col premium" style={{ gap: 10 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="row between"><div className="section-title" style={{ margin: 0 }}><FileText size={14} />Tailored resume ready</div>
+        <Button size="sm" icon={ExternalLink} onClick={() => app.run('shell:openPath', [r.path])}>Open PDF</Button></div>
+      <div className="small muted">{r.fileName} · {r.attachedTo ? 'will be uploaded for this application' : 'save or apply to this job to use it automatically'}</div>
+      {r.changes && r.changes.length > 0 && <div><span className="label">What was tailored</span><ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{r.changes.map((c, i) => <li key={i}>{c}</li>)}</ul></div>}
+      {r.removed && r.removed.length > 0 && <div className="small" style={{ color: 'var(--amber)' }}>Truth check removed {r.removed.length} item(s) the AI tried to add: {r.removed.join('; ')}</div>}
+    </motion.div>
   );
 }
 

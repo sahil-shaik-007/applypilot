@@ -2,8 +2,64 @@
 
 'use strict';
 
+const path = require('path');
 const dom = require('../dom');
 const { fillForm } = require('./generic');
+const { answerFromProfile } = require('../answers');
+
+// Identity inputs (by input name) and the question each one answers.
+const IDENTITY = { firstname: 'First name', lastname: 'Last name', email: 'Email', phone: 'Phone number', address: 'Address' };
+const RESUME_SEL = 'input[type="file"][data-ui="resume"]';
+
+// Workable keeps a saved draft per job in the browser and restores it on load: earlier names, emails,
+// phones and the resume file come back pre-filled. Identity fields are therefore set from the
+// candidate's own data every time, and a value with no source is flagged rather than silently kept.
+async function identityHook(frame, f, ctx) {
+  const name = String(f.name || '').toLowerCase();
+  const label = IDENTITY[name];
+  if (!label) return undefined;
+  const want = answerFromProfile(label, { type: 'text', phoneNational: true }, ctx.profile, ctx.job);
+  const page = String(f.value || '').trim();
+  if (!want) {
+    if (!page) return undefined; // nothing to give and nothing pre-filled: generic handling reports it if required
+    ctx.emit('warn', `${label} is pre-filled with "${page}", which is not in your profile or resume. Check it before submitting.`, { question: label });
+    return 'unanswered';
+  }
+  if (name === 'phone' && ctx.profile.phoneCountryCode) {
+    // The number is typed without a country code, so the page's country picker must show the same code.
+    const cc = String(ctx.profile.phoneCountryCode).replace(/\D/g, '');
+    const shown = await frame.locator('button[aria-label^="Change country for phone number"]').first().getAttribute('aria-label').catch(() => '');
+    if (cc && shown && !shown.includes(`+${cc})`)) {
+      ctx.emit('warn', `Phone country on the form does not match your profile (+${cc}). Set it before submitting.`, { question: label });
+      return 'unanswered';
+    }
+  }
+  if (page === String(want)) return 'filled';
+  if (!(await dom.fillText(frame, `[data-ap-id="${f.key}"]`, String(want), ctx))) return 'unanswered';
+  ctx.emit('filled', `${label} → ${want}`, { question: label, answer: want, source: 'profile' });
+  return 'filled';
+}
+
+// True when the resume card shown on the page is the file ApplyPilot is uploading. The page shows the
+// original file name (e.g. "Sahul_Resume.pdf"), not the stored copy's id-based name.
+async function resumeShown(frame, resume) {
+  const base = (resume && resume.fileName) || path.basename(resume.path || '');
+  if (!base) return false;
+  return frame.evaluate((n) => (document.body.innerText || '').includes(n), base).catch(() => false);
+}
+
+// Uploads the selected resume into Workable's resume input, replacing any restored draft file.
+async function attachResume(frame, ctx) {
+  const file = ctx.resume && ctx.resume.path;
+  if (!file) return false;
+  for (let i = 0; i < 2; i++) {
+    if (!(await frame.locator(RESUME_SEL).count().catch(() => 0))) return false;
+    await dom.uploadFile(frame, RESUME_SEL, file, ctx).catch(() => {});
+    await dom.sleep(3000);
+    if (await resumeShown(frame, ctx.resume)) return true;
+  }
+  return false;
+}
 
 module.exports = {
   id: 'workable',
@@ -34,10 +90,20 @@ module.exports = {
     await dom.rejectCookies(page);
   },
   async fill(page, ctx) {
-    return fillForm(page.mainFrame(), ctx, {
+    const frame = page.mainFrame();
+    await attachResume(frame, ctx);
+    const result = await fillForm(frame, ctx, {
       root: 'form[data-ui="application-form"], main form, form',
       afterUploadWaitMs: 3000,
+      fieldHook: identityHook,
+      phoneNational: true,
     });
+    // The draft can be restored after the upload, so confirm the resume is still the one attached.
+    if (ctx.resume && ctx.resume.path) {
+      const ok = (await resumeShown(frame, ctx.resume)) || (await attachResume(frame, ctx));
+      if (!ok) result.unanswered = [...(result.unanswered || []), { question: 'Resume (could not be attached; attach it yourself)', required: true }];
+    }
+    return result;
   },
   async submit(page, ctx) {
     if (!ctx.allowSubmit) throw new dom.SubmitGuardError('submit() called without allowSubmit');

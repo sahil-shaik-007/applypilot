@@ -225,6 +225,15 @@ async function fillOne(frame, f, ctx, cfg, state) {
   let { ans, source } = await getAnswer(f, ctx, info);
   if (ans == null) {
     const hasValue = Array.isArray(f.value) ? f.value.length : !!f.value;
+    if (source === 'prefilled') {
+      // A value the page already had (a restored draft or browser autofill) that isn't from the profile:
+      // keep it, but surface it for review instead of submitting it silently.
+      const shown = Array.isArray(f.value) ? f.value.join(', ') : String(f.value);
+      const question = f.question || f.name;
+      state.unanswered.push({ question, required: !!f.required, prefilled: shown.slice(0, 80) });
+      ctx.emit('warn', `"${question}" is already filled with "${shown.slice(0, 80)}", which is not from your profile. Check it before submitting.`, { question });
+      return;
+    }
     if (!hasValue && (f.required || f.kind !== 'checkbox')) state.unanswered.push({ question: f.question || f.name, required: !!f.required });
     return;
   }

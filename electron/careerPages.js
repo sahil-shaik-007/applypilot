@@ -39,15 +39,26 @@ function slugFrom(ats, text) {
   return null;
 }
 
-function companyFromHtml(html, url) {
+// The company behind a careers page. Order: the site's own name, then the company part of a job
+// page title ("Graduate Engineer Trainee - Exponent Energy"), then "Careers at X" style titles, then the
+// board slug (e.g. "exponent-energy" -> "Exponent Energy"). A job title is never used as the company.
+const GENERIC_TITLE = /^(careers?|jobs?|openings|(open )?roles|positions|work with us|join us|search|apply|home|welcome|job (application|details|board))$/i;
+const prettySlug = (slug) => String(slug || '').replace(/[-_.]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+function companyFromHtml(html, url, { slug = '' } = {}) {
   const meta = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:site_name/i);
-  if (meta) return htmlToText(meta[1]).trim();
+  if (meta) { const n = htmlToText(meta[1]).trim(); if (n && n.length <= 60) return n; }
   const title = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  if (title) {
-    const t = htmlToText(title[1]).split(/\s[|–—-]\s|:\s/).map((s) => s.trim()).filter(Boolean);
-    const named = t.find((s) => !/careers?|jobs?|openings|(open )?roles|positions|work with us|join us|search/i.test(s));
-    if (named && named.length <= 60) return named;
+  const titleText = title ? htmlToText(title[1]).trim() : '';
+  const at = titleText.match(/(?:careers|jobs)\s+(?:at|@)\s+([^|\-–—:]{2,50})/i) || titleText.match(/^([^|\-–—:]{2,50}?)\s+(?:careers|jobs)\b/i);
+  if (at && !GENERIC_TITLE.test(at[1].trim())) return at[1].trim();
+  // A single job page: "<job title> - <company>" -> the last part is the company.
+  const isJobPage = /\/(j|jobs?|job|positions?|postings?|requisitions?|o)\/[^/?#]+/i.test(new URL(url).pathname) || /\/\d{4,}/.test(new URL(url).pathname);
+  const parts = titleText.split(/\s[|–—-]\s|:\s/).map((x) => x.trim()).filter(Boolean);
+  if (isJobPage && parts.length >= 2) {
+    const last = parts[parts.length - 1];
+    if (last.length <= 60 && !GENERIC_TITLE.test(last)) return last;
   }
+  if (slug) return prettySlug(slug);
   const host = new URL(url).hostname.replace(/^(www|careers|jobs|join)\./, '');
   const base = host.split('.')[0];
   return base.charAt(0).toUpperCase() + base.slice(1);
@@ -178,7 +189,7 @@ async function inspect(url) {
   const direct = slugFrom(null, u.href);
   let html = '';
   try { html = await fetchText(u.href, { timeout: 25000, headers: { Accept: 'text/html,application/xhtml+xml' } }); } catch (e) { if (!direct) throw new Error(`Couldn't open that page (${e.message}).`); }
-  const company = html ? companyFromHtml(html, u.href) : (direct && direct.slug);
+  const company = html ? companyFromHtml(html, u.href, { slug: direct ? direct.slug : '' }) : (direct && direct.slug);
   const ats = direct || (html && slugFrom(null, html));
   if (ats) {
     const cfg = { url: u.href, method: 'ats', ats: ats.ats, slug: ats.slug, company, enabled: true };

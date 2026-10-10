@@ -585,7 +585,9 @@ function answerRaw(question, fi, p, job) {
   }
   if (/time ?zone/.test(q)) return p.timezone || null;
   if (/zip|postal|post code|postcode|pin ?code/.test(q)) return p.postalCode || null;
-  if (/street|address line 1|^address$|mailing address|home address|address 1|residential address/.test(q)) {
+  // A bare "Address" asks for the full place (street, city, state, country), e.g. Workable's field.
+  if (/^address$/.test(q)) return [p.addressLine1, p.addressLine2, p.city, p.state, p.country].filter(has).join(', ') || null;
+  if (/street|address line 1|mailing address|home address|address 1|residential address/.test(q)) {
     if (/line 2|address 2/.test(q)) return p.addressLine2 || null;
     return p.addressLine1 || null;
   }

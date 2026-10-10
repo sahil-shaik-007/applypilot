@@ -166,18 +166,21 @@ function __apScan(cfg) {
   };
   const reqOf = (els, lab) => els.some((e) => e.required || e.getAttribute('aria-required') === 'true') || isRequiredText(lab.raw);
 
-  const all = deepAll(root, 'input,select,textarea,[role=combobox],[aria-pressed]');
+  const all = deepAll(root, 'input,select,textarea,[role=combobox],[aria-pressed],[role=radio]');
   const fields = [];
   const seenGroups = new Set();
   const excluded = (el) => (excludeSel && el.closest(excludeSel)) ||
     /recaptcha|hcaptcha|h-captcha|cf-turnstile/i.test(`${el.name || ''} ${el.id || ''} ${el.className || ''}`) ||
     (el.closest && el.closest('.iti__dropdown-content,.iti__country-container,[role=dialog][aria-modal=true] .iti'));
 
-  // button groups (Ashby Yes/No etc.) first, so we can suppress their hidden checkbox
+  // button groups (Ashby Yes/No etc.) first, so we can suppress their hidden checkbox.
+  // Also ARIA radio options (role=radio + aria-checked, e.g. Workable YES/NO inside a radiogroup).
+  const isPressBtn = (b) => b.hasAttribute('aria-pressed') || b.getAttribute('role') === 'radio';
+  const isOn = (b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true';
   const pressGroups = new Map();
   for (const b of all) {
-    if (!b.hasAttribute || !b.hasAttribute('aria-pressed') || excluded(b) || !isVisible(b)) continue;
-    const p = b.parentElement; if (!p) continue;
+    if (!b.hasAttribute || !isPressBtn(b) || excluded(b) || !isVisible(b)) continue;
+    const p = (b.getAttribute('role') === 'radio' && b.closest('[role=radiogroup]')) || b.parentElement; if (!p) continue;
     if (!pressGroups.has(p)) pressGroups.set(p, []);
     pressGroups.get(p).push(b);
   }
@@ -188,12 +191,14 @@ function __apScan(cfg) {
     const key = tag(p);
     const opts = btns.map((b, i) => { b.setAttribute('data-ap-id', key); b.setAttribute('data-ap-opt', String(i)); return clean(rawText(b)); });
     const lab = labelOf(p.querySelector('input') || btns[0], { group: [...btns, ...p.querySelectorAll('input')], optionLabels: opts });
-    const pressed = btns.find((b) => b.getAttribute('aria-pressed') === 'true');
-    fields.push({ key, kind: 'buttons', question: lab.text, required: isRequiredText(lab.raw) || !!p.querySelector('input[required]'), options: opts, value: pressed ? clean(rawText(pressed)) : '' });
+    const pressed = btns.find(isOn);
+    // a Yes/No question with no readable label is still reported (as its options), never silently dropped
+    fields.push({ key, kind: 'buttons', question: lab.text || opts.join(' / '), required: isRequiredText(lab.raw) || !!p.querySelector('input[required]') || btns.some((b) => b.getAttribute('aria-required') === 'true'), options: opts, value: pressed ? clean(rawText(pressed)) : '' });
   }
 
   for (const el of all) {
     if (el.hasAttribute('aria-pressed') && el.tagName !== 'INPUT') continue;
+    if (el.getAttribute('role') === 'radio' && el.tagName !== 'INPUT') continue; // ARIA option (grouped above)
     const tg = el.tagName;
     const type = (el.getAttribute('type') || (tg === 'INPUT' ? 'text' : tg.toLowerCase())).toLowerCase();
     if (tg === 'INPUT' && type === 'password') continue; // never touch credentials
@@ -202,6 +207,7 @@ function __apScan(cfg) {
     if (excluded(el)) continue;
     if (el.disabled || el.readOnly && el.getAttribute('role') !== 'combobox' && tg !== 'SELECT') { if (type !== 'file') continue; }
     if (el.parentElement && groupedParents.has(el.parentElement)) continue;
+    if (tg === 'INPUT' && el.closest && el.closest('[role=radio]')) continue; // hidden native input inside an ARIA radio option
     if (type === 'file') {
       if (hiddenByAncestor(el) && !nearVisible(el, 6)) continue;
       const key = tag(el);
@@ -402,11 +408,18 @@ async function chooseGroupOption(frame, groupKey, index, ctx, checked = true) {
   return setChecked(frame, `[data-ap-grp="${groupKey}"][data-ap-opt="${index}"]`, checked, ctx);
 }
 
+// Click one option of a button / ARIA-radio group and verify it stuck (aria-pressed or aria-checked).
 async function clickPressButton(frame, groupKey, index, ctx) {
   const loc = frame.locator(`[data-ap-id="${groupKey}"][data-ap-opt="${index}"]`).first();
+  const isOn = () => loc.evaluate((el) => el.getAttribute('aria-pressed') === 'true' || el.getAttribute('aria-checked') === 'true').catch(() => false);
+  if (await isOn()) return true;
   await safeClick(loc, ctx);
   await humanPause(ctx);
-  return (await loc.getAttribute('aria-pressed').catch(() => 'true')) === 'true';
+  if (await isOn()) return true;
+  // fallback: click the option's label (drives its hidden native radio) or the option itself via DOM
+  await loc.evaluate((el) => { (el.querySelector('label') || el).click(); }).catch(() => {});
+  await humanPause(ctx, 80, 250);
+  return isOn();
 }
 
 async function readComboOptions(frame, selector) {

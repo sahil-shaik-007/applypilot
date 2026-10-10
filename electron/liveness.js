@@ -36,6 +36,16 @@ async function isStillOpen(job) {
       if (r.code !== 200 || !r.json || !Array.isArray(r.json.jobs)) return null;
       return r.json.jobs.some((j) => j.id === id);
     }
+    if (job.ats === 'workable') {
+      // Single-job endpoint: state is "published" while the posting is open; closed or drafted ones aren't.
+      const account = m.account || (url.match(/apply\.workable\.com\/([^/]+)/) || [])[1];
+      const code = m.shortcode || (url.match(/\/j\/([A-Za-z0-9]+)/) || [])[1];
+      if (!account || !code) return null;
+      const r = await status(`https://apply.workable.com/api/v2/accounts/${account}/jobs/${code}`, { json: true });
+      if (r.code === 404) return false;
+      if (r.code !== 200 || !r.json) return null;
+      return r.json.state === 'published';
+    }
     if (job.ats === 'smartrecruiters') {
       const company = m.company || (url.match(/smartrecruiters\.com\/([^/]+)/) || [])[1];
       const id = m.postingId || m.jobId || (url.match(/smartrecruiters\.com\/[^/]+\/(\d+)/) || [])[1];

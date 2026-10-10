@@ -2,6 +2,23 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.2] — 2026-10-11
+
+### Fixed
+- **Wrong company name for career pages.** Adding a careers page took the company from the page title, so a job page such as "Graduate Engineer Trainee - Exponent Energy" made the job title the company (every job from that board showed "Graduate Engineer Trainee"). The company now comes from the site name, then the company part of a job-page title, then "Careers at X" titles, then the board slug.
+- **Workable open/closed check.** Workable postings are now checked against Workable's single-job endpoint, so a filled posting is skipped instead of being treated as unknown.
+- **Workable application form:**
+  - Name, email, phone and address come from your profile, or from the resume when the profile is empty. A draft the browser restored (an old name, email or phone) is overwritten. The field is never left with a value that isn't yours.
+  - The resume you selected is attached, even if an older draft file is still on the form. The app checks the attachment by its original file name.
+  - Phone numbers are typed in national format, so the country code isn't doubled.
+- **YES / NO questions on Workable** (role="radio" groups) are detected, answered and verified. Before, they were skipped without any message.
+- **Values already on a form are reported.** A pre-filled answer that isn't from your profile is kept for review and listed as unanswered, instead of being submitted silently.
+
+### Known limits
+- The name on a resume is split into first and last names by a guess. If the form shows the wrong split, set first and last name in Profile.
+- A resume file restored as a draft on other ATS forms can still be kept; this release fixes Workable only.
+- Tests were not run for this release, at your request.
+
 ## [1.4.1] — 2026-10-11
 
 ### Added

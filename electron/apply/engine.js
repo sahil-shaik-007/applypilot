@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const dom = require('./dom');
+const { guessProfile } = require('../resume');
 
 const ADAPTERS = {
   greenhouse: require('./adapters/greenhouse'),
@@ -89,6 +90,30 @@ class Semaphore {
 
 function abortError() { const e = new Error('Aborted'); e.code = 'ABORTED'; return e; }
 const safeName = (s) => String(s || 'job').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80);
+
+// Identity fields come from the saved profile first. Any the profile leaves empty are read from the
+// resume text itself (never invented); a value the user saved in the profile always wins.
+const IDENTITY_FROM_RESUME = ['firstName', 'lastName', 'middleName', 'email', 'phone', 'phoneCountryCode', 'linkedin', 'github'];
+function profileWithResumeIdentity(profile, resume) {
+  const out = { ...(profile || {}) };
+  if (!resume || !resume.text) return out;
+  let guessed = {};
+  try { guessed = guessProfile(String(resume.text)) || {}; } catch { guessed = {}; }
+  for (const k of IDENTITY_FROM_RESUME) {
+    const cur = out[k];
+    if ((cur == null || String(cur).trim() === '') && guessed[k]) out[k] = guessed[k];
+  }
+  return out;
+}
+
+// The profile name is what the form gets; warn when it does not appear in the resume being uploaded.
+function resumeNameWarning(profile, resume) {
+  const text = resume && resume.text ? String(resume.text).toLowerCase() : '';
+  if (!text) return null;
+  const missing = [profile.firstName, profile.lastName].filter((n) => n && String(n).trim() && !text.includes(String(n).trim().toLowerCase()));
+  if (!missing.length) return null;
+  return `The name "${missing.join(' ')}" from your profile does not appear in the resume "${resume.fileName || 'resume'}". Check the Profile name before submitting.`;
+}
 
 class ApplyEngine {
   constructor({ userDataDir, getSettings, log } = {}) {
@@ -243,8 +268,11 @@ class ApplyEngine {
       const target = adapter.resolveUrl ? adapter.resolveUrl(job) : startUrl;
       result.url = target;
 
+      const effectiveProfile = profileWithResumeIdentity(profile, resume);
+      const nameWarn = resumeNameWarning(effectiveProfile, resume);
+      if (nameWarn) emit('warn', nameWarn);
       const ctx = {
-        job, profile, resume, coverLetterText, answerQuestion, signal, settings, mode, page,
+        job, profile: effectiveProfile, resume, coverLetterText, answerQuestion, signal, settings, mode, page,
         human: settings.humanDelays !== false && mode !== 'dryrun',
         allowSubmit: false,
         emit, log,

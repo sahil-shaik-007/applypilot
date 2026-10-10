@@ -10,6 +10,8 @@ WORKDIR /app/web/client
 COPY web/client/package.json web/client/package-lock.json* ./
 RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY web/shared /app/web/shared
+# gen-icons.mjs (npm run build) renders the PWA icons from the desktop icon
+COPY build/icon.png /app/build/icon.png
 COPY web/client/ ./
 RUN npm run build
 

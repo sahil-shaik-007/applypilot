@@ -12,6 +12,7 @@ keys
 release
 dist
 build
+!build/icon.png
 src
 scripts
 docs

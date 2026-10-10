@@ -54,15 +54,17 @@ function countryOf(job = {}) {
   return best ? best.country : null;
 }
 
-// opts: { countries: [], postedWithinDays: 0, postedMonths: [1..12], foundWithinHours: 0, now }
+// opts: { countries: [], postedWithinHours: 0, postedMonths: [1..12], foundWithinHours: 0, now }  (postedWithinDays: legacy)
 function matchesWindow(job = {}, opts = {}) {
   const now = opts.now || Date.now();
   const countries = (opts.countries || []).filter(Boolean);
   if (countries.length && !countries.includes(countryOf(job))) return false;
   const posted = job.postedAt ? new Date(job.postedAt) : null;
   const validPosted = posted && !Number.isNaN(posted.getTime());
-  if (opts.postedWithinDays > 0) {
-    if (!validPosted || now - posted.getTime() > opts.postedWithinDays * 86400000) return false;
+  // Posted within N hours (any period the user picks). postedWithinDays is kept for older campaigns.
+  const postedHours = opts.postedWithinHours > 0 ? opts.postedWithinHours : (opts.postedWithinDays > 0 ? opts.postedWithinDays * 24 : 0);
+  if (postedHours > 0) {
+    if (!validPosted || now - posted.getTime() > postedHours * 3600000) return false;
   }
   if (opts.postedMonths && opts.postedMonths.length) {
     if (!validPosted || !opts.postedMonths.includes(posted.getMonth() + 1)) return false;

@@ -382,13 +382,13 @@ async function campaigns() {
     const tag = modal.locator('.tag-input input').first();
     await tag.fill('Filter Test Role'); await tag.press('Enter');
     await modal.locator('.chip, .badge', { hasText: /^India$/ }).first().click(); await page.waitForTimeout(200);
-    await modal.locator('select', { has: page.locator('option[value="7"]') }).first().selectOption('7');
+    await modal.locator('select', { has: page.locator('option[value="168"]') }).first().selectOption('168');
     await modal.locator('.chip, .badge', { hasText: /^Jan$/ }).first().click(); await page.waitForTimeout(200);
     await page.locator('.modal-foot button', { hasText: /^Save$/ }).click(); await page.waitForTimeout(700);
     const c = (await call('campaigns:list')).find((x) => x.roles && x.roles[0] === 'Filter Test Role');
     assert(c, 'campaign not saved');
     assert(JSON.stringify(c.countries) === '["India"]', `countries not saved: ${JSON.stringify(c.countries)}`);
-    assert(c.postedWithinDays === 7, `posted within not saved: ${c.postedWithinDays}`);
+    assert(c.postedWithinHours === 168, `posted within not saved: ${c.postedWithinHours}`);
     assert(JSON.stringify(c.postedMonths) === '[1]', `months not saved: ${JSON.stringify(c.postedMonths)}`);
     await call('campaigns:delete', c.id); // keep this check's campaign out of the later parallel-run checks
   });
@@ -759,6 +759,11 @@ async function settingsAndPlans() {
     assert(await page.getByRole('button', { name: /Find with AI/ }).isVisible(), 'plain-English search button missing');
     assert(await page.locator('.card select', { has: page.locator('option[value="24"]') }).count() > 0, 'found-within filter missing');
     assert(await page.getByText('Country', { exact: true }).first().isVisible(), 'country filter missing');
+    // Custom period: 5 days -> the amount and unit controls appear and keep their values.
+    await page.locator('.card select', { has: page.locator('option[value="custom"]') }).first().selectOption('custom'); await page.waitForTimeout(200);
+    await page.locator('input[aria-label="Amount"]').first().fill('5');
+    await page.locator('select[aria-label="Unit"]').first().selectOption('days'); await page.waitForTimeout(200);
+    assert(await page.locator('input[aria-label="Amount"]').first().inputValue() === '5', 'custom amount not kept');
     await shot('18-find-jobs-prompt');
   });
   await check('AI actions without a key show a helpful message', async () => {

@@ -2,6 +2,18 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.1] — 2026-10-11
+
+### Added
+- **Choose any time period.** "Posted within" (campaigns and Find jobs) and "Found within" (Find jobs) use one picker:
+  - presets: any time, last hour, 6 hours, 12 hours, 24 hours, 2, 3 or 7 days, 14 days, 30 days
+  - **Custom period…**: any amount of hours, days, weeks or months (up to one year)
+  - campaigns that used the old day-based setting keep working
+  - a campaign card shows its period, for example "posted last 2 weeks"
+
+### Changed
+- Reinstalled ApplyPilot: uninstalled 1.4.0 and installed 1.4.1 fresh. Your saved data folder is kept by the uninstaller.
+
 ## [1.4.0] — 2026-10-11
 
 ### Added

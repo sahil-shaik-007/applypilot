@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, MapPin, Loader2, Check, CircleAlert, SearchX, Rocket, Sparkles } from 'lucide-react';
 import { useApp } from '../lib/store';
-import { Button, Seg, Empty, Switch, Progress } from '../components/ui';
+import { Button, Seg, Empty, Switch, Progress, PeriodPicker } from '../components/ui';
 import { JobCard, JobDrawer, AUTO_ATS } from '../components/jobs';
 
 const SORTS = { score: 'Best match (default)', newest: 'Newest first', salary: 'Highest salary' };
@@ -42,7 +42,7 @@ export default function Jobs({ params }) {
   const [progress, setProgress] = useState([]);
   const [stats, setStats] = useState(null);
   const [open, setOpen] = useState(null);
-  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, visa: false, eligible: true, days: 0, hideApplied: true, source: 'all', text: '', country: 'all', foundHours: 0 });
+  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, visa: false, eligible: true, postedHours: 0, hideApplied: true, source: 'all', text: '', country: 'all', foundHours: 0 });
   const [discovery, setDiscovery] = useState(null);
   const [sort, setSort] = useState('score');
   const searchId = useRef(null);
@@ -82,7 +82,7 @@ export default function Jobs({ params }) {
       && (!f.hasSalary || j.salaryMin || j.salaryMax || j.salaryText)
       && (!f.visa || (j.match && j.match.sponsorship === 'offered'))
       && (!f.eligible || !j.match || !j.match.eligibility || j.match.eligibility.ok)
-      && (!f.days || (j.postedAt && Date.now() - new Date(j.postedAt) < f.days * 86400000))
+      && (!f.postedHours || (j.postedAt && Date.now() - new Date(j.postedAt) < f.postedHours * 3600000))
       && (!f.hideApplied || !j.appStatus || j.appStatus === 'saved')
       && (f.source === 'all' || j.source === f.source)
       && (f.country === 'all' || j.country === f.country)
@@ -159,18 +159,8 @@ export default function Jobs({ params }) {
               <div className="row between"><span className="field-label">Min. match</span><span className="small">{f.minScore}%</span></div>
               <input type="range" className="range" min={0} max={95} step={5} value={f.minScore} onChange={(e) => setF({ ...f, minScore: +e.target.value })} />
             </div>
-            <div>
-              <span className="field-label">Posted within</span>
-              <select className="select" value={f.days} onChange={(e) => setF({ ...f, days: +e.target.value })}>
-                <option value={0}>Any time</option><option value={1}>24 hours</option><option value={3}>3 days</option><option value={7}>7 days</option><option value={30}>30 days</option>
-              </select>
-            </div>
-            <div>
-              <span className="field-label">Found within</span>
-              <select className="select" value={f.foundHours} onChange={(e) => setF({ ...f, foundHours: +e.target.value })}>
-                <option value={0}>Any time</option><option value={1}>Last hour</option><option value={6}>Last 6 hours</option><option value={24}>Last 24 hours</option>
-              </select>
-            </div>
+            <PeriodPicker label="Posted within" value={f.postedHours} onChange={(v) => setF({ ...f, postedHours: v })} />
+            <PeriodPicker label="Found within (first seen by ApplyPilot)" value={f.foundHours} onChange={(v) => setF({ ...f, foundHours: v })} />
             <div>
               <span className="field-label">Country</span>
               <select className="select" value={f.country} onChange={(e) => setF({ ...f, country: e.target.value })}>

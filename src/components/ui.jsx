@@ -291,3 +291,70 @@ export function ConfirmDialog({ state, onClose }) {
     </Modal>
   );
 }
+
+// ---- Time period: "posted within" / "found within". Values are in hours (0 = any time).
+export const PERIOD_PRESETS = [
+  { v: 0, l: 'Any time' },
+  { v: 1, l: 'Last hour' },
+  { v: 6, l: 'Last 6 hours' },
+  { v: 12, l: 'Last 12 hours' },
+  { v: 24, l: 'Last 24 hours' },
+  { v: 48, l: 'Last 2 days' },
+  { v: 72, l: 'Last 3 days' },
+  { v: 168, l: 'Last 7 days' },
+  { v: 336, l: 'Last 14 days' },
+  { v: 720, l: 'Last 30 days' },
+];
+const UNITS = { hours: 1, days: 24, weeks: 168, months: 730 };
+
+export function periodLabel(hours) {
+  const h = Number(hours) || 0;
+  if (!h) return 'Any time';
+  const preset = PERIOD_PRESETS.find((p) => p.v === h);
+  if (preset) return preset.l;
+  if (h % 730 === 0) return `Last ${h / 730} month${h / 730 === 1 ? '' : 's'}`;
+  if (h % 168 === 0) return `Last ${h / 168} week${h / 168 === 1 ? '' : 's'}`;
+  if (h % 24 === 0) return `Last ${h / 24} day${h / 24 === 1 ? '' : 's'}`;
+  return `Last ${h} hour${h === 1 ? '' : 's'}`;
+}
+
+// A select with presets plus a custom amount: "Last 5 days", "Last 3 weeks", "Last 2 months"…
+export function PeriodPicker({ value = 0, onChange, label }) {
+  const isPreset = PERIOD_PRESETS.some((p) => p.v === value);
+  const [custom, setCustom] = useState(!isPreset && value > 0);
+  const initialUnit = (() => {
+    if (!value) return 'days';
+    if (value % 730 === 0) return 'months';
+    if (value % 168 === 0) return 'weeks';
+    if (value % 24 === 0) return 'days';
+    return 'hours';
+  })();
+  const [unit, setUnit] = useState(initialUnit);
+  const [amount, setAmount] = useState(value && !isPreset ? Math.max(1, Math.round(value / UNITS[initialUnit])) : 3);
+  const showCustom = custom || (!isPreset && value > 0);
+  const pick = (v) => {
+    if (v === 'custom') { setCustom(true); onChange(Math.max(1, amount) * UNITS[unit]); return; }
+    setCustom(false);
+    onChange(Number(v));
+  };
+  const setAmt = (n) => { const x = Math.min(8760, Math.max(1, Math.round(Number(n) || 1))); setAmount(x); onChange(x * UNITS[unit]); };
+  const setUnitTo = (u) => { setUnit(u); onChange(Math.max(1, amount) * UNITS[u]); };
+  return (
+    <div className="col" style={{ gap: 6 }}>
+      {label && <span className="field-label">{label}</span>}
+      <select className="select" value={showCustom ? 'custom' : value} onChange={(e) => pick(e.target.value)}>
+        {PERIOD_PRESETS.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
+        <option value="custom">Custom period…</option>
+      </select>
+      {showCustom && (
+        <div className="row" style={{ gap: 6 }}>
+          <span className="small dim">Last</span>
+          <input className="input" type="number" min={1} max={8760} style={{ width: 80 }} value={amount} onChange={(e) => setAmt(e.target.value)} aria-label="Amount" />
+          <select className="select" style={{ width: 120 }} value={unit} onChange={(e) => setUnitTo(e.target.value)} aria-label="Unit">
+            <option value="hours">hours</option><option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option>
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}

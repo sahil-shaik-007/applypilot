@@ -75,6 +75,14 @@ function mockServer(port) {
     assert.ok(!jf.matchesWindow({ postedAt: old }, { postedWithinDays: 7, now }));
     assert.ok(!jf.matchesWindow({ postedAt: null }, { postedWithinDays: 7, now }));
   });
+  await check('posted-within-hours takes any period; the older days setting still works', async () => {
+    const h = new Date(now - 30 * 3600000).toISOString(); // 30 hours ago
+    assert.ok(jf.matchesWindow({ postedAt: h }, { postedWithinHours: 36, now }), '30h inside a 36h window');
+    assert.ok(!jf.matchesWindow({ postedAt: h }, { postedWithinHours: 24, now }), '30h outside a 24h window');
+    assert.ok(jf.matchesWindow({ postedAt: new Date(now - 5 * 86400000).toISOString() }, { postedWithinHours: 15 * 24, now }), 'custom 15 days');
+    assert.ok(!jf.matchesWindow({ postedAt: new Date(now - 5 * 86400000).toISOString() }, { postedWithinDays: 3, now }), 'legacy 3 days');
+    assert.ok(jf.matchesWindow({ postedAt: new Date(now - 2 * 86400000).toISOString() }, { postedWithinHours: 0, postedWithinDays: 0, now }), '0 means any time');
+  });
   await check('posted-months keeps only the chosen months', async () => {
     const oct = new Date('2026-10-03T00:00:00Z').toISOString();
     const jan = new Date('2026-01-03T00:00:00Z').toISOString();

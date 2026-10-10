@@ -192,7 +192,7 @@ class CampaignManager {
       // Never apply at the company you work for today.
       if (isCurrentEmployer(job, profile)) { skipped++; employerSkipped++; continue; }
       // Country / posted-date / month filters chosen on the campaign.
-      if (!matchesWindow(job, { countries: c.countries, postedWithinDays: c.postedWithinDays, postedMonths: c.postedMonths })) { skipped++; continue; }
+      if (!matchesWindow(job, { countries: c.countries, postedWithinHours: c.postedWithinHours, postedWithinDays: c.postedWithinDays, postedMonths: c.postedMonths })) { skipped++; continue; }
       const excluded = isExcluded(job, { profile, campaign: c });
       if (excluded) { skipped++; continue; }
       if (include.length && !include.some((k) => `${job.title} ${job.description}`.toLowerCase().includes(k))) { skipped++; continue; }

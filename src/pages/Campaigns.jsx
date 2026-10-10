@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Rocket, Play, Pause, Pencil, Trash2, Plus, Loader2, FileText, Clock, Zap, Search as SearchIcon } from 'lucide-react';
 import { useApp } from '../lib/store';
-import { Button, Modal, Field, TagInput, Seg, MultiChips, Empty, Progress, timeAgo, stagger } from '../components/ui';
+import { Button, Modal, Field, TagInput, Seg, MultiChips, Empty, Progress, PeriodPicker, periodLabel, timeAgo, stagger } from '../components/ui';
 
 const PHASE = { searching: 'Searching all sources', scoring: 'Scoring matches', applying: 'Applying', sleeping: 'Waiting for next run', idle: 'Idle' };
 const MODES = [
@@ -15,7 +15,7 @@ const COLORS = ['#6366f1', '#22d3ee', '#f472b6', '#f59e0b', '#10b981', '#a78bfa'
 export function CampaignEditor({ open, onClose, initial }) {
   const app = useApp();
   const profile = app.profile.values || {};
-  const blank = { name: '', roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [], countries: [], postedWithinDays: 0, postedMonths: [] };
+  const blank = { name: '', roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [], countries: [], postedWithinHours: 0, postedMonths: [] };
   const [c, setC] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setC({ ...blank, ...(initial || {}) }); }, [open]); // eslint-disable-line
@@ -54,10 +54,8 @@ export function CampaignEditor({ open, onClose, initial }) {
             <MultiChips value={c.countries || []} options={app.countries || []} onChange={up('countries')} />
           </Field>
           <div className="col" style={{ gap: 14 }}>
-            <Field label="Posted within">
-              <select className="select" value={c.postedWithinDays || 0} onChange={(e) => up('postedWithinDays')(+e.target.value)}>
-                {POSTED.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
-              </select>
+            <Field label="Posted within" help="Only jobs posted in this period. Choose a preset or a custom number of hours, days, weeks or months.">
+              <PeriodPicker value={c.postedWithinHours ?? (c.postedWithinDays || 0) * 24} onChange={up('postedWithinHours')} />
             </Field>
             <Field label="Only in these months" help="Jobs posted in the months you pick. Empty = any month.">
               <MultiChips value={(c.postedMonths || []).map((n) => MONTHS[n - 1])} options={MONTHS} onChange={(v) => up('postedMonths')(v.map((m) => MONTHS.indexOf(m) + 1))} />
@@ -170,7 +168,7 @@ function CampaignCard({ c, index, onEdit, onDetails }) {
         <div className="metric" role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="See queued jobs" onClick={() => setDetails('queued')}><div className="k">Queued</div><div className="v">{apps.filter((a) => a.status === 'queued').length}</div></div>
       </div>
       <div className="row between tiny dim" style={{ padding: '0 18px 12px', position: 'relative', zIndex: 2 }}>
-        <span><FileText size={11} style={{ verticalAlign: -1 }} /> {resume ? resume.name : 'Auto resume'} · {MODES.find((m) => m.value === c.mode)?.label} · ≥{c.minScore}%{(c.countries || []).length ? ` · ${c.countries.join(', ')}` : ''}{c.stats?.currentEmployerSkipped ? ` · ${c.stats.currentEmployerSkipped} skipped (current employer)` : ''}</span>
+        <span><FileText size={11} style={{ verticalAlign: -1 }} /> {resume ? resume.name : 'Auto resume'} · {MODES.find((m) => m.value === c.mode)?.label} · ≥{c.minScore}%{(c.countries || []).length ? ` · ${c.countries.join(', ')}` : ''}{(c.postedWithinHours || c.postedWithinDays) ? ` · posted ${periodLabel(c.postedWithinHours ?? c.postedWithinDays * 24).toLowerCase()}` : ''}{c.stats?.currentEmployerSkipped ? ` · ${c.stats.currentEmployerSkipped} skipped (current employer)` : ''}</span>
         <a href="#" onClick={(e) => { e.preventDefault(); app.go('queue'); }}>View matches →</a>
       </div>
     </motion.div>
@@ -178,7 +176,6 @@ function CampaignCard({ c, index, onEdit, onDetails }) {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const POSTED = [{ v: 0, l: 'Any time' }, { v: 1, l: 'Last 24 hours' }, { v: 3, l: 'Last 3 days' }, { v: 7, l: 'Last 7 days' }, { v: 30, l: 'Last 30 days' }];
 
 // Where a campaign's jobs came from (sources), and the applications it made.
 function CampaignDetails({ c, tab, onClose }) {

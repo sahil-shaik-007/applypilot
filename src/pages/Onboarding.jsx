@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Star, ArrowRight, ArrowLeft, Rocket, ShieldCheck, Zap, FileText, Globe, Sparkles, Check } from 'lucide-react';
 import { useApp } from '../lib/store';
+import markUrl from '../assets/mark.svg';
 import { Button, Field, TagInput, MultiChips, Seg } from '../components/ui';
 import { Dropzone, ResumeChips, mergeProfile } from './Resumes';
 import { withDefaults } from './Profile';
@@ -57,7 +58,7 @@ export default function Onboarding() {
             {step === 0 && (
               <div style={{ textAlign: 'center' }}>
                 <motion.div initial={{ scale: 0.6, rotate: -30, opacity: 0 }} animate={{ scale: 1, rotate: 0, opacity: 1 }} transition={{ type: 'spring', stiffness: 200, damping: 12 }}>
-                  <Star size={46} fill="currentColor" style={{ color: 'var(--accent)', filter: 'drop-shadow(0 0 24px rgba(99,102,241,.8))' }} />
+                  <img src={markUrl} alt="ApplyPilot" width={84} height={84} style={{ filter: 'drop-shadow(0 0 28px rgba(99,102,241,.55))' }} />
                 </motion.div>
                 <h1 style={{ fontSize: 48, margin: '18px 0 12px', lineHeight: 1.1 }}>Your job hunt,<br />on autopilot.</h1>
                 <p className="muted" style={{ fontSize: 16, maxWidth: 560, margin: '0 auto', lineHeight: 1.7 }}>ApplyPilot searches 25+ job sources and 250 platforms, ranks every job against your resume, and fills applications for you — several roles in parallel, each with the right resume.</p>

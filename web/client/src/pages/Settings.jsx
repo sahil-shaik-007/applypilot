@@ -6,6 +6,7 @@ import { api } from '../lib/api.js';
 import { Button, Sheet, Field, timeAgo, copyText, downloadFile } from '../components/ui.jsx';
 import { useDevices } from './Home.jsx';
 import { NewPassphraseFields, RecoveryKeyPanel, passphraseStrength } from './Vault.jsx';
+import { ApplyingCard, CareerPagesCard } from '../components/settingsCards.jsx';
 
 function LinkCodeSheet({ code, onClose, onExpire }) {
   const app = useApp();
@@ -134,6 +135,9 @@ export default function Settings() {
           {error && <div className="small" style={{ color: 'var(--red)' }}>{error}</div>}
         </div>
       </div>
+
+      <ApplyingCard />
+      <CareerPagesCard />
 
       <div className="card pad col" style={{ gap: 10 }}>
         <div className="section-title" style={{ margin: 0 }}><KeyRound size={14} />Vault security</div>

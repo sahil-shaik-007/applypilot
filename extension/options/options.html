@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ApplyPilot extension — options</title>
+  <link rel="stylesheet" href="../ui/theme.css">
+  <style>
+    body { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; display: flex; flex-direction: column; gap: 16px; }
+    h1 { font-size: 22px; margin: 0; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    ol { margin: 6px 0 12px; padding-left: 20px; color: var(--muted); }
+    .codebox { display: flex; gap: 8px; }
+    .codebox input { flex: 1; }
+    #pairedBox .row { margin-top: 6px; }
+    .kbd { font-size: 12px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 1px 6px; color: var(--fg); }
+  </style>
+</head>
+<body>
+  <div class="brand"><img src="../icons/mark.svg" alt="" style="width:28px;height:28px"><h1>ApplyPilot for your browser</h1></div>
+
+  <section class="card premium" id="pairCard">
+    <h2>Connect to the desktop app</h2>
+    <div id="pairForm">
+      <ol>
+        <li>Open <b>ApplyPilot</b> on this PC.</li>
+        <li>Go to <b>Settings → Browser extension</b> and copy the 6-digit code.</li>
+        <li>Enter it below.</li>
+      </ol>
+      <div class="codebox">
+        <input id="code" type="tel" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="000000" aria-label="Pairing code">
+        <button id="pairBtn" class="btn primary">Pair</button>
+      </div>
+    </div>
+    <div id="pairedBox" class="hidden">
+      <div class="row"><span class="dot on"></span><b id="pairedText">Connected</b></div>
+      <div class="row small muted" id="pairedMeta"></div>
+      <div class="row"><button id="unpairBtn" class="btn ghost">Unpair this browser</button></div>
+    </div>
+    <div id="pairMsg" class="msg hidden" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Autofill</h2>
+    <label class="toggle"><input type="checkbox" id="attachResume"><span>Attach my resume when the form has a resume upload<br><span class="small muted">The file is fetched from the desktop app only at that moment, for that tab.</span></span></label>
+    <label class="toggle"><input type="checkbox" id="highlight"><span>Highlight what ApplyPilot filled (indigo) and what needs me (amber)</span></label>
+    <label class="toggle"><input type="checkbox" id="learn"><span>Learn my answers: when I submit a form, save the answers I typed for unanswered questions to my Answer bank</span></label>
+    <label class="toggle"><input type="checkbox" id="overwrite"><span>Overwrite fields that already have a value</span></label>
+  </section>
+
+  <section class="card">
+    <h2>Saving jobs</h2>
+    <label class="toggle"><input type="radio" name="defaultStatus" value="saved"><span>Save to Applications (tracker)</span></label>
+    <label class="toggle"><input type="radio" name="defaultStatus" value="queued"><span>Add to the Review queue</span></label>
+  </section>
+
+  <section class="card small">
+    <h2>Shortcuts</h2>
+    <div class="muted"><span class="kbd">Alt+Shift+A</span> open · <span class="kbd">Alt+Shift+S</span> save job · <span class="kbd">Alt+Shift+F</span> autofill. Change them at <span class="kbd">chrome://extensions/shortcuts</span> or <span class="kbd">edge://extensions/shortcuts</span>.</div>
+  </section>
+
+  <section class="card small muted">
+    <h2 style="color:var(--fg)">Privacy</h2>
+    The extension talks only to the ApplyPilot app on this computer (127.0.0.1). It reads a page only when you click the extension or use a shortcut. No analytics, no remote code, no ApplyPilot servers. It never submits applications, never fills passwords and never solves CAPTCHAs.
+  </section>
+  <script src="options.js"></script>
+</body>
+</html>

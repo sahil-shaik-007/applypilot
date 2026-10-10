@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="160 160 704 704" width="704" height="704">
+  <title>ApplyPilot mark</title>
+  <!-- Mark only (transparent background) for dark UIs: indigo→cyan gradient with a soft glow. -->
+  <defs>
+    <linearGradient id="lite" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/><stop offset=".6" stop-color="#8b9cff"/><stop offset="1" stop-color="#7ce8ff"/>
+    </linearGradient>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#262070"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b5ff0"/><stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="26"/></filter>
+  </defs>
+  <g filter="url(#glow)" opacity=".5">
+    <path d="M254 550 L 416 700" stroke="#6366f1" stroke-width="96" stroke-linecap="round"/>
+    <polygon points="812,226 330,640 474,664" fill="#7c8cff"/>
+  </g>
+  <path d="M254 550 L 416 700" stroke="url(#stroke)" stroke-width="96" stroke-linecap="round"/>
+  <polygon points="812,226 330,640 474,664" fill="url(#lite)"/>
+  <polygon points="812,226 474,664 486,780" fill="url(#dark)"/>
+</svg>

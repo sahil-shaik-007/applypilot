@@ -1,0 +1,328 @@
+# ApplyPilot iOS: simulator build + smoke launch on every relevant change, and an optional
+# signed archive -> IPA -> TestFlight upload that only runs when the Apple signing secrets exist.
+# Docs: docs/IOS.md
+name: iOS
+
+on:
+  push:
+    branches: [main, 'ci/ios-*']
+    tags: ['v*']
+    paths:
+      - 'web/client/**'
+      - 'web/shared/**'
+      - 'electron/data/profile-schema.json'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'web/client/**'
+      - 'web/shared/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: 'Upload the signed build to TestFlight (needs the Apple secrets)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  CLIENT_DIR: web/client
+  BUNDLE_ID: com.applypilot.app
+
+jobs:
+  # ---------------------------------------------------------------------------------------
+  # Unsigned simulator build, then boot a simulator, install, launch and screenshot the app.
+  # ---------------------------------------------------------------------------------------
+  simulator:
+    name: Simulator build + launch
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: web/client
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/client/package-lock.json
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes available | grep -i ios || true
+          node --version
+
+      - name: Install web dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web client
+        run: npm run build
+
+      - name: Capacitor sync (iOS)
+        run: npx cap sync ios
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: web/client/ios/App/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('web/client/ios/App/CapApp-SPM/Package.swift', 'web/client/package-lock.json') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Pick and boot an iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          ios = sorted((r for r in data if ".iOS-" in r), key=lambda r: [int(x) for x in r.split("iOS-")[-1].split("-") if x.isdigit()], reverse=True)
+          for runtime in ios:
+              phones = [d for d in data[runtime] if d["name"].startswith("iPhone") and d.get("isAvailable", True)]
+              pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
+              pick = (pro or phones)
+              if pick:
+                  print(pick[0]["udid"]); break
+          ')
+          test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
+          xcrun simctl list devices | grep "$UDID"
+          xcrun simctl boot "$UDID" || true
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build for the simulator (no signing)
+        working-directory: web/client/ios/App
+        run: |
+          mkdir -p build
+          xcodebuild build \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath SourcePackages \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | tee build/xcodebuild.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)|\*\*" || true
+          test -d build/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+
+      - name: Zip the .app
+        working-directory: web/client/ios/App/build/DerivedData/Build/Products/Debug-iphonesimulator
+        run: ditto -c -k --sequesterRsrc --keepParent App.app "$GITHUB_WORKSPACE/ApplyPilot-simulator.app.zip"
+
+      - name: Install, launch and screenshot
+        working-directory: web/client/ios/App
+        run: |
+          UDID=${{ steps.sim.outputs.udid }}
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance dark || true
+          xcrun simctl install "$UDID" build/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl launch "$UDID" "$BUNDLE_ID"
+          # Give WKWebView time to load and render the PWA.
+          sleep 25
+          mkdir -p "$GITHUB_WORKSPACE/ios-shots"
+          xcrun simctl io "$UDID" screenshot "$GITHUB_WORKSPACE/ios-shots/ios-01-launch.png"
+          # Still alive? (a crash on launch would leave no process)
+          xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE_ID" || { echo "::error::App is not running after launch"; exit 1; }
+          # A second shot a bit later, after any first-run animation.
+          sleep 8
+          xcrun simctl io "$UDID" screenshot "$GITHUB_WORKSPACE/ios-shots/ios-02-home.png"
+          xcrun simctl spawn "$UDID" log show --last 3m --style compact \
+            --predicate 'process == "App"' > "$GITHUB_WORKSPACE/ios-shots/app-log.txt" 2>&1 || true
+          ls -la "$GITHUB_WORKSPACE/ios-shots"
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApplyPilot-simulator-app
+          path: ApplyPilot-simulator.app.zip
+          retention-days: 14
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: ios-shots/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: web/client/ios/App/build/xcodebuild.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------
+  # Decide whether signing is possible (job-level `if` cannot read secrets directly).
+  # ---------------------------------------------------------------------------------------
+  signing-check:
+    name: Apple signing secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          if [ -n "$APPLE_TEAM_ID" ] && [ -n "$BUILD_CERTIFICATE_BASE64" ] && [ -n "$P12_PASSWORD" ] && [ -n "$BUILD_PROVISION_PROFILE_BASE64" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Apple signing secrets not set; skipping the signed archive / TestFlight job. See docs/IOS.md."
+          fi
+
+  # ---------------------------------------------------------------------------------------
+  # Signed App Store archive -> IPA (artifact) -> TestFlight (on tags or manual opt-in).
+  # ---------------------------------------------------------------------------------------
+  testflight:
+    name: Signed IPA + TestFlight
+    needs: [signing-check, simulator]
+    if: needs.signing-check.outputs.enabled == 'true' && github.event_name != 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: web/client
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+      BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/client/package-lock.json
+
+      - name: Build web client and sync
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npx cap sync ios
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: web/client/ios/App/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('web/client/ios/App/CapApp-SPM/Package.swift', 'web/client/package-lock.json') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Install certificate and provisioning profile
+        id: signing
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"; cp "$RUNNER_TEMP/profile.mobileprovision" "$d/$PROFILE_UUID.mobileprovision"
+          done
+          echo "profile_name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Using provisioning profile: $PROFILE_NAME ($PROFILE_UUID)"
+
+      - name: Switch the App target to manual distribution signing
+        working-directory: web/client/ios/App
+        env:
+          PROFILE_NAME: ${{ steps.signing.outputs.profile_name }}
+        run: |
+          # Only the App target carries CODE_SIGN_STYLE, so Swift package targets are untouched
+          # (passing PROVISIONING_PROFILE_SPECIFIER on the command line would break them).
+          perl -0pi -e 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;\n\t\t\t\tDEVELOPMENT_TEAM = $ENV{APPLE_TEAM_ID};\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "$ENV{PROFILE_NAME}";\n\t\t\t\t"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";/g' App.xcodeproj/project.pbxproj
+          grep -n "CODE_SIGN_STYLE\|PROVISIONING_PROFILE_SPECIFIER\|DEVELOPMENT_TEAM" App.xcodeproj/project.pbxproj
+
+      - name: Archive
+        working-directory: web/client/ios/App
+        run: |
+          xcodebuild archive \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/ApplyPilot.xcarchive \
+            -clonedSourcePackagesDirPath SourcePackages \
+            -skipPackagePluginValidation \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            | tee build-archive.log | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)|\*\*" || true
+          test -d build/ApplyPilot.xcarchive
+
+      - name: Export IPA
+        working-directory: web/client/ios/App
+        env:
+          PROFILE_NAME: ${{ steps.signing.outputs.profile_name }}
+        run: |
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string></dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/ApplyPilot.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/ipa
+          ls -la build/ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApplyPilot-ipa
+          path: web/client/ios/App/build/ipa/*.ipa
+          retention-days: 30
+
+      - name: Upload to TestFlight
+        if: (github.event_name == 'workflow_dispatch' && inputs.testflight) || startsWith(github.ref, 'refs/tags/v')
+        working-directory: web/client/ios/App
+        run: |
+          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$ASC_KEY_P8_BASE64" || {
+            echo "::error::APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _API_KEY_P8_BASE64 are required for upload"; exit 1; }
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo -n "$ASC_KEY_P8_BASE64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          IPA=$(ls build/ipa/*.ipa | head -1)
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/profile.mobileprovision" "$HOME/.appstoreconnect/private_keys/"*.p8

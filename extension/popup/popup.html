@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ApplyPilot</title>
+  <link rel="stylesheet" href="../ui/theme.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="row">
+    <div class="brand grow"><img src="../icons/mark.svg" alt=""> ApplyPilot</div>
+    <span id="conn" class="row small muted"><span class="dot" id="connDot"></span><span id="connText">Connecting…</span></span>
+  </header>
+
+  <section id="unpaired" class="card hidden">
+    <div class="label">Not connected</div>
+    <p id="unpairedText" class="small muted">Pair this browser with the ApplyPilot desktop app to save jobs and autofill forms.</p>
+    <button id="openOptions" class="btn primary block">Pair with ApplyPilot</button>
+  </section>
+
+  <section id="loading" class="row small muted"><span class="spinner"></span> Reading this page…</section>
+
+  <section id="jobCard" class="card hidden">
+    <div class="row" style="align-items:flex-start">
+      <div class="grow">
+        <div class="label" id="jobSource">Job</div>
+        <div id="jobTitle" class="title"></div>
+        <div id="jobMeta" class="small muted"></div>
+      </div>
+      <div id="scoreRing" class="ring hidden" title="Match score"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" class="track"/><circle cx="18" cy="18" r="15.5" class="bar" id="ringBar"/></svg><span id="scoreValue">–</span></div>
+    </div>
+    <div id="elig" class="pills"></div>
+    <ul id="reasons" class="plain small muted"></ul>
+    <div id="skills" class="small"></div>
+    <div id="existing" class="msg ok hidden"></div>
+    <div class="row actions">
+      <button id="saveBtn" class="btn primary grow">Save to ApplyPilot</button>
+      <button id="queueBtn" class="btn" title="Add to the Review queue instead of just saving">Queue</button>
+    </div>
+    <div id="saveMsg" class="msg hidden"></div>
+  </section>
+
+  <section id="noJob" class="card hidden">
+    <div class="label">No job posting found</div>
+    <p class="small muted">Open a job posting (LinkedIn, Indeed, Naukri, Glassdoor, Wellfound, foundit, Instahyre or any company careers page).</p>
+  </section>
+
+  <section id="formCard" class="card hidden">
+    <div class="row"><div class="label grow">Application form</div><span id="formFields" class="pill"></span></div>
+    <button id="fillBtn" class="btn primary block">Autofill this form</button>
+    <p class="small muted note">Fills from your ApplyPilot profile and Answer bank. You review and click Submit. Never touches passwords or CAPTCHAs.</p>
+    <div id="fillMsg" class="msg hidden"></div>
+    <div id="needs" class="hidden">
+      <div class="label">Needs you</div>
+      <ul id="needsList" class="plain small"></ul>
+      <button id="learnBtn" class="btn block">Save answers I typed to ApplyPilot</button>
+      <div id="learnMsg" class="msg hidden"></div>
+    </div>
+  </section>
+
+  <section id="embedded" class="card hidden">
+    <div class="label">Form is embedded from another site</div>
+    <p class="small muted">Open it in its own tab, then use Autofill there.</p>
+    <ul id="embeddedList" class="plain small"></ul>
+  </section>
+
+  <div id="error" class="msg err hidden"></div>
+
+  <footer class="row small muted">
+    <span class="grow">You always click Submit.</span>
+    <a href="#" id="optionsLink">Options</a>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>

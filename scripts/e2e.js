@@ -667,7 +667,7 @@ async function settingsAndPlans() {
     assert(!s.enabledSources, 'not re-enabled');
   });
   await check('custom company board can be added and removed', async () => {
-    await page.locator('.side-list button', { hasText: 'Company boards' }).click(); await page.waitForTimeout(500);
+    await page.locator('.side-list button', { hasText: 'Career pages' }).click(); await page.waitForTimeout(500);
     await page.locator('input[placeholder^="Careers URL"]').fill('https://jobs.lever.co/acme-test');
     await page.getByRole('button', { name: /^Add$/ }).click(); await page.waitForTimeout(600);
     let s = (await call('app:bootstrap')).settings;
@@ -676,6 +676,35 @@ async function settingsAndPlans() {
     s = (await call('app:bootstrap')).settings;
     assert(!(s.customCompanies.lever || []).some((c) => c.slug === 'acme-test'), 'not removed');
   });
+  await check('a bad careers link shows a clear error and adds nothing', async () => {
+    try { await call('careerPages:inspect', 'not a url'); throw new Error('no error'); } catch (e) { assert(/full careers page link/.test(e.message), e.message); }
+    try { await call('careerPages:inspect', 'file:///C:/Windows/win.ini'); throw new Error('no error'); } catch (e) { assert(/http\(s\)/.test(e.message), e.message); }
+    assert((await call('careerPages:list')).length === 0, 'something was added');
+  });
+  if (!QUICK) {
+    await check('any company careers page: inspect -> preview -> add & watch -> toggle -> refresh -> remove', async () => {
+      await page.locator('input[placeholder="https://company.com/careers"]').fill('https://www.notion.com/careers');
+      await page.getByRole('button', { name: 'Inspect' }).click();
+      await page.getByRole('button', { name: /Add & watch/ }).waitFor({ timeout: 60000 });
+      assert(await page.getByText(/ATS board · auto-apply capable \(ashby: notion\)/).isVisible(), 'ATS not detected in preview');
+      await shot('16-career-pages');
+      await page.getByRole('button', { name: /Add & watch/ }).click(); await page.waitForTimeout(1500);
+      let list = await call('careerPages:list');
+      assert(list.length === 1 && list[0].method === 'ats' && list[0].slug === 'notion', `not saved: ${JSON.stringify(list)}`);
+      try { await call('careerPages:add', { url: list[0].url, method: 'ats' }); throw new Error('dup allowed'); } catch (e) { assert(/already/.test(e.message), e.message); }
+      const row = page.locator('.card', { hasText: "Watch any company's careers page" }).locator('.row', { hasText: 'notion.com/careers' }).first();
+      await row.locator('.switch').click(); await page.waitForTimeout(500);
+      assert((await call('careerPages:list'))[0].enabled === false, 'not disabled');
+      await row.locator('.switch').click(); await page.waitForTimeout(500);
+      const r = await call('careerPages:refresh', list[0].id);
+      assert(r.count > 0 && r.jobs.length > 0 && r.jobs.every((j) => j.ats === 'ashby'), `refresh returned ${r.count}`);
+      list = await call('careerPages:list');
+      assert(list[0].enabled !== false && list[0].lastChecked && list[0].jobCount === r.count, 'page state not updated');
+      await row.locator('button[title="Stop watching"]').click();
+      await confirmDialog('Remove');
+      assert((await call('careerPages:list')).length === 0, 'not removed');
+    });
+  }
   await check('AI actions without a key show a helpful message', async () => {
     try { await call('ai:coverLetter', 'nope'); throw new Error('no error'); } catch (e) { assert(/Anthropic API key/.test(e.message), e.message); }
   });

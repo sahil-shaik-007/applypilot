@@ -71,6 +71,7 @@ function createStore(baseDir) {
     platforms: c('platform-usage', { used: {} }),
     network: c('network', { items: [], importedAt: null }), // LinkedIn connections (local only)
     cloud: c('cloud', {}), // phone/web sync link (token + data key are DPAPI-encrypted)
+    careerPages: c('career-pages', { items: [] }), // any company careers pages the user watches
   };
   // Make sure new default settings keys appear after upgrades.
   store.settings.data = { ...DEFAULT_SETTINGS, ...store.settings.data, keys: { ...(store.settings.data.keys || {}) } };

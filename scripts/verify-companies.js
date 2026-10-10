@@ -4,6 +4,7 @@
 //   node scripts/verify-companies.js            # probe candidates + re-check existing list
 //   node scripts/verify-companies.js --recheck  # only re-check the existing companies.json
 //   node scripts/verify-companies.js --keep-empty  # also keep boards that respond 200 with 0 jobs
+//   node scripts/verify-companies.js --candidates other.js --report r.json --no-write   # discovery dry run
 //
 // Every candidate slug (scripts/company-candidates.js) is probed against every supported ATS.
 // A board is kept when the public endpoint answers 200 with a jobs array (and, by default, at
@@ -15,7 +16,10 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'electron', 'data', 'companies.json');
-const REPORT = path.join(__dirname, 'verify-report.json');
+const argVal = (n, d) => { const a = process.argv.slice(2); const i = a.indexOf(n); return i >= 0 ? a[i + 1] : d; };
+const REPORT = path.resolve(argVal('--report', path.join(__dirname, 'verify-report.json')));
+const CANDIDATES = path.resolve(argVal('--candidates', path.join(__dirname, 'company-candidates.js')));
+const NO_WRITE = process.argv.includes('--no-write');
 const CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY || 16);
 const args = new Set(process.argv.slice(2));
 const KEEP_EMPTY = args.has('--keep-empty');
@@ -132,9 +136,12 @@ const PROBES = {
 };
 
 // ATSes where every candidate slug is probed; workable/recruitee only get their curated lists.
+// Per-ATS lists (module.exports.greenhouse / .lever / .ashby / .smartrecruiters / .workable /
+// .recruitee) are probed ONLY on that ATS: use them for slugs harvested from real board URLs, so a
+// generic slug cannot match an unrelated organisation on another ATS.
 const BLIND_ATS = ['greenhouse', 'lever', 'ashby', 'smartrecruiters'];
 function parseCandidates() {
-  const mod = require('./company-candidates.js');
+  const mod = require(CANDIDATES);
   const parse = (line, ats) => {
     const [name, ...slugs] = line.split('|').map((s) => s.trim()).filter(Boolean);
     const derived = name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -142,8 +149,7 @@ function parseCandidates() {
   };
   return [
     ...mod.map((l) => parse(l, BLIND_ATS)),
-    ...(mod.workable || []).map((l) => parse(l, ['workable'])),
-    ...(mod.recruitee || []).map((l) => parse(l, ['recruitee'])),
+    ...ATS_ORDER.flatMap((a) => (mod[a] || []).map((l) => parse(l, [a]))),
   ];
 }
 
@@ -207,7 +213,7 @@ async function main() {
   const out = Object.fromEntries(ATS_ORDER.map((a) => [a, []]));
   const seen = new Set();
   const report = { generatedAt: new Date().toISOString(), kept: [], missing: [] };
-  const cand = require('./company-candidates.js');
+  const cand = require(CANDIDATES);
   const exclude = new Set((cand.exclude || []).map((k) => k.toLowerCase()));
   const rename = Object.fromEntries(Object.entries(cand.rename || {}).map(([k, v]) => [k.toLowerCase(), v]));
   const push = (ats, slug, name, r) => {
@@ -242,13 +248,15 @@ async function main() {
   }
 
   for (const a of ATS_ORDER) out[a].sort((x, y) => x.name.localeCompare(y.name));
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
+  if (!NO_WRITE) {
+    fs.mkdirSync(path.dirname(OUT), { recursive: true });
+    fs.writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
+  }
   fs.writeFileSync(REPORT, JSON.stringify(report, null, 2) + '\n');
 
   const counts = ATS_ORDER.map((a) => `${a}=${out[a].length}`).join(' ');
   console.log(`Verified ${report.kept.length} boards (${counts}) in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-  console.log(`Wrote ${path.relative(ROOT, OUT)}; details in ${path.relative(ROOT, REPORT)}`);
+  console.log(`${NO_WRITE ? 'Dry run (companies.json untouched)' : `Wrote ${path.relative(ROOT, OUT)}`}; details in ${REPORT}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

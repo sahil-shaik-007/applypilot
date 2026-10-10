@@ -1,0 +1,28 @@
+body { width: 360px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+header { padding-bottom: 2px; }
+.title { font-size: 16px; font-weight: 700; line-height: 1.25; margin: 2px 0 3px; word-break: break-word; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pills:empty { display: none; }
+#reasons { margin-top: 8px; }
+#reasons:empty, #skills:empty { display: none; }
+#reasons li::before { content: '› '; color: var(--accent-2); }
+#skills { margin-top: 6px; color: var(--muted); }
+#skills b { color: var(--fg); font-weight: 600; }
+.actions { margin-top: 12px; }
+#saveMsg, #existing, #fillMsg, #learnMsg { margin-top: 8px; }
+.note { margin: 8px 0 0; }
+#formCard .btn.block { margin-top: 8px; }
+#needs { margin-top: 10px; }
+#needsList li { color: var(--amber); }
+#needsList li .req { color: var(--red); }
+.ring { position: relative; width: 54px; height: 54px; flex: none; }
+.ring svg { width: 54px; height: 54px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 3.2; }
+.ring .track { stroke: rgba(255, 255, 255, .1); }
+.ring .bar { stroke: var(--accent-2); stroke-linecap: round; stroke-dasharray: 97.4; stroke-dashoffset: 97.4; transition: stroke-dashoffset .6s ease; }
+.ring span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 15px; }
+.ring.good .bar { stroke: var(--green); }
+.ring.mid .bar { stroke: var(--amber); }
+.ring.low .bar { stroke: var(--red); }
+footer { border-top: 1px solid var(--border); padding-top: 8px; }
+#embeddedList a { word-break: break-all; }

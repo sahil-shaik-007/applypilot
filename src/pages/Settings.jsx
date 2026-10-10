@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Smartphone, RefreshCw, Lock, Users, Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn } from 'lucide-react';
+import { Smartphone, RefreshCw, Lock, Users, Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn, Search, Zap } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Field, Switch, Seg } from '../components/ui';
 import { CONFIG, PRICING } from '../config';
@@ -9,7 +9,7 @@ const TABS = [
   { id: 'general', label: 'General', icon: Cog },
   { id: 'sources', label: 'Job sources', icon: Database },
   { id: 'ai', label: 'AI', icon: Bot },
-  { id: 'companies', label: 'Company boards', icon: Building2 },
+  { id: 'companies', label: 'Career pages', icon: Building2 },
   { id: 'network', label: 'Network (referrals)', icon: Users },
   { id: 'cloud', label: 'Phone & web', icon: Smartphone },
   { id: 'plan', label: 'Plan & license', icon: Crown },
@@ -182,10 +182,11 @@ function Companies() {
   const remove = async (a, s) => app.set({ settings: await app.run('settings:update', [{ customCompanies: { ...custom, [a]: custom[a].filter((c) => c.slug !== s) } }]) });
   return (
     <div className="col" style={{ gap: 18 }}>
+      <CareerPages />
       <p className="muted" style={{ margin: 0 }}>ApplyPilot reads company career pages directly from their applicant tracking system — the freshest jobs, often before they hit LinkedIn, and auto-apply capable.</p>
       <div className="grid g3">{Object.entries(counts).map(([k, v]) => <div key={k} className="card pad metric"><div className="k">{k}</div><div className="v">{v} companies</div></div>)}</div>
       <div className="card pad">
-        <div className="section-title">Add a dream company</div>
+        <div className="section-title">Add an ATS board by slug</div>
         <div className="row">
           <select className="select" style={{ width: 180 }} value={ats} onChange={(e) => setAts(e.target.value)}>{['greenhouse', 'lever', 'ashby', 'workable', 'smartrecruiters', 'recruitee'].map((a) => <option key={a}>{a}</option>)}</select>
           <input className="input grow" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="Careers URL or slug, e.g. https://jobs.lever.co/acme" />
@@ -196,6 +197,82 @@ function Companies() {
           {Object.entries(custom).flatMap(([a, list]) => (list || []).map((c) => <span key={a + c.slug} className="tag">{a}: {c.slug}<button onClick={() => remove(a, c.slug)}><Trash2 size={11} /></button></span>))}
         </div>
       </div>
+    </div>
+  );
+}
+
+const METHOD_LABEL = { ats: 'ATS board · auto-apply capable', workday: 'Workday', jsonld: 'Structured job data', links: 'Page links' };
+
+// Watch any company's careers page: paste a link -> inspect -> preview jobs -> add & watch.
+function CareerPages() {
+  const app = useApp();
+  const [pages, setPages] = useState([]);
+  const [url, setUrl] = useState('');
+  const [found, setFound] = useState(null);
+  const [busy, setBusy] = useState('');
+  useEffect(() => { app.run('careerPages:list').then(setPages).catch(() => {}); }, []); // eslint-disable-line
+  const inspect = async () => {
+    const u = url.trim();
+    if (!u) return;
+    setBusy('inspect'); setFound(null);
+    try { setFound(await app.run('careerPages:inspect', [/^https?:/i.test(u) ? u : `https://${u}`])); } catch {} finally { setBusy(''); }
+  };
+  const add = async () => {
+    setBusy('add');
+    try {
+      const next = await app.run('careerPages:add', [found], `Watching ${found.company} — its jobs are included in every search and campaign`);
+      setPages(next); setFound(null); setUrl('');
+      const added = next[next.length - 1];
+      if (added) app.run('careerPages:refresh', [added.id]).then((r) => setPages(r.pages)).catch(() => {});
+    } catch {} finally { setBusy(''); }
+  };
+  const refresh = async (p) => {
+    setBusy(p.id);
+    try { const r = await app.run('careerPages:refresh', [p.id]); setPages(r.pages); app.toast(`${r.count} jobs from ${p.company} added to Jobs`, 'success'); } catch {} finally { setBusy(''); }
+  };
+  const toggle = async (p) => setPages(await app.run('careerPages:update', [p.id, { enabled: p.enabled === false }]));
+  const remove = async (p) => { if (await app.confirm({ title: 'Stop watching this page?', message: `${p.company} will no longer be searched. Jobs already found stay in your Jobs list.`, confirmLabel: 'Remove' })) setPages(await app.run('careerPages:remove', [p.id])); };
+  return (
+    <div className="card pad col" style={{ gap: 12 }}>
+      <div className="section-title" style={{ margin: 0 }}>Watch any company's careers page</div>
+      <div className="small muted">Paste the careers page of any company. ApplyPilot works out how the page lists its jobs (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Workday or the page itself), then includes them in every search and campaign so you can auto-apply like any other job.</div>
+      <div className="row">
+        <input className="input grow" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && inspect()} placeholder="https://company.com/careers" />
+        <Button icon={Search} onClick={inspect} disabled={!url.trim() || busy === 'inspect'}>{busy === 'inspect' ? 'Reading page…' : 'Inspect'}</Button>
+      </div>
+      {found && (
+        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="card pad col" style={{ gap: 8, background: 'var(--bg-2, rgba(255,255,255,.02))' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <div className="col" style={{ gap: 2 }}>
+              <input className="input" style={{ fontWeight: 600, maxWidth: 320 }} value={found.company || ''} onChange={(e) => setFound({ ...found, company: e.target.value })} aria-label="Company name" />
+              <span className="small dim">{METHOD_LABEL[found.method] || found.method}{found.ats && found.method === 'ats' ? ` (${found.ats}: ${found.slug})` : ''} · {found.jobCount} open {found.jobCount === 1 ? 'role' : 'roles'}</span>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              <Button onClick={() => setFound(null)}>Cancel</Button>
+              <Button icon={Plus} onClick={add} disabled={busy === 'add'}>Add &amp; watch</Button>
+            </div>
+          </div>
+          <div className="col" style={{ gap: 4 }}>
+            {(found.jobsPreview || []).map((j) => <div key={j.id} className="small row" style={{ justifyContent: 'space-between', gap: 8 }}><span>{j.title}</span><span className="dim">{j.location}</span></div>)}
+            {found.jobCount > (found.jobsPreview || []).length && <div className="small dim">…and {found.jobCount - found.jobsPreview.length} more</div>}
+          </div>
+        </motion.div>
+      )}
+      {pages.length > 0 && (
+        <div className="col" style={{ gap: 6 }}>
+          {pages.map((p) => (
+            <div key={p.id} className="row" style={{ gap: 10, justifyContent: 'space-between', opacity: p.enabled === false ? 0.55 : 1 }}>
+              <div className="col grow" style={{ gap: 2, minWidth: 0 }}>
+                <span style={{ fontWeight: 600 }}>{p.company} {p.method === 'ats' && <Zap size={12} style={{ color: 'var(--accent, #818cf8)' }} title="Auto-apply capable" />}</span>
+                <span className="small dim" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.url} · {p.jobCount || 0} jobs{p.lastChecked ? ` · checked ${new Date(p.lastChecked).toLocaleString()}` : ''}</span>
+              </div>
+              <Switch on={p.enabled !== false} onChange={() => toggle(p)} />
+              <Button size="sm" icon={RefreshCw} onClick={() => refresh(p)} disabled={busy === p.id} title="Fetch jobs now">{busy === p.id ? 'Fetching…' : 'Refresh'}</Button>
+              <Button size="sm" icon={Trash2} onClick={() => remove(p)} title="Stop watching" />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -340,7 +417,12 @@ function Data() {
           try { await app.run('data:reset'); } catch {}
         }}>Delete everything</Button>
       </Row>
-      <Row title="Version"><span className="muted">ApplyPilot {app.version}</span></Row>
+      <Row title={`ApplyPilot ${app.version}`} desc="Updates download automatically in the background and install on restart.">
+        <Button icon={RefreshCw} onClick={async () => { const r = await app.run('app:checkUpdates'); app.toast(r.message, r.status === 'error' ? 'error' : 'success'); }}>Check for updates</Button>
+      </Row>
+      <Row title="Export diagnostics" desc="A file for support: versions, settings (no keys), counts and recent errors. Contains no profile, resume or application contents.">
+        <Button onClick={async () => { const p = await app.run('app:exportDiagnostics'); if (p) app.toast('Diagnostics saved', 'success'); }}>Export</Button>
+      </Row>
     </div>
   );
 }

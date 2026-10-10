@@ -60,7 +60,7 @@ async function searchAll(params, opts = {}) {
     const t0 = Date.now();
     try {
       const jobs = await Promise.race([
-        c.search({ limit: 60, ...params }, { keys, companies: opts.companies, log: opts.log || (() => {}) }),
+        c.search({ limit: 60, ...params }, { keys, companies: opts.companies, careerPages: opts.careerPages || [], log: opts.log || (() => {}) }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timed out')), opts.timeoutMs || 90000)),
       ]);
       const list = (jobs || []).filter((j) => j && j.title);

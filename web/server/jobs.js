@@ -42,9 +42,10 @@ const REMOTE = new Set(['any', 'remote', 'onsite']);
 const norm = (s, max) => (typeof s === 'string' ? s : '').normalize('NFKC').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, max);
 
 /**
- * @param {{ aggregator?: {searchAll, listConnectors}, limits }} opts
+ * @param {{ aggregator?: {searchAll, listConnectors}, limits, onFresh?: (jobs) => void }} opts
+ *   onFresh is called with the jobs of every fresh (non-cached) fetch, e.g. to record first-seen history.
  */
-export function createJobSearch({ aggregator, limits }) {
+export function createJobSearch({ aggregator, limits, onFresh }) {
   const agg = aggregator || loadConnectorAggregator();
   const freeIds = new Set(agg.listConnectors({}).filter((c) => c.ready && !(c.requiresKeys || []).length).map((c) => c.id));
   const cache = new LruCache(limits.searchCacheMax, limits.searchCacheTtlMs);
@@ -57,6 +58,7 @@ export function createJobSearch({ aggregator, limits }) {
     if (!remote) throw new HttpError(400, 'remote must be any, remote or onsite');
     if (!q && !location) throw new HttpError(400, 'Enter a job title, keyword or location');
     let sources = [];
+    if (typeof query.sources === 'string' && query.sources.length > 1000) throw new HttpError(400, 'sources is too long');
     if (typeof query.sources === 'string' && query.sources.trim()) {
       sources = [...new Set(query.sources.split(',').map((s) => s.trim()).filter((s) => freeIds.has(s)))].sort();
       if (!sources.length) throw new HttpError(400, 'None of the requested sources are available');
@@ -88,6 +90,7 @@ export function createJobSearch({ aggregator, limits }) {
       );
       const shaped = shape(result);
       cache.set(key, shaped);
+      if (onFresh) { try { onFresh(shaped.jobs); } catch (e) { console.error(`job history update failed: ${e && e.message}`); } }
       return { ...shaped, cached: false };
     })();
     inflight.set(key, p);

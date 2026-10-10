@@ -18,10 +18,19 @@ The ApplyPilot website (`web/`) is a **mobile-first PWA**. People use it from th
 | Logging | Request logs contain method, path, status and duration only: no bodies, tokens, emails or IPs beyond rate limiting. |
 | AI | AI calls go **directly from the user's device to Anthropic** with the user's own key, which is stored inside the encrypted vault. The server never sees prompts or keys. |
 | Account | Export (all ciphertext plus the vault document) and **delete account** (hard-deletes all rows and blobs immediately). |
+| Native app sessions | The iOS/Android apps sign in with `{ client: 'native' }` and receive a bearer token `ap_s_<256-bit base64url>` in the body instead of cookies. Only its SHA-256 hash is stored, with the same 30-day sliding expiry as web sessions. It is listed under Devices (`apps`) and Sessions and is revocable there, by logout, or by "sign out everywhere". Session rows carry a `kind` (`web` / `native`), so a native token is **never** accepted from a cookie and a web cookie token is never accepted as a bearer token. Bearer requests are CSRF-exempt. A native sign-in returns its token only in the response body, so it accepts no Origin (native HTTP), a Capacitor origin or `APP_ORIGIN`. Any other browser Origin is refused. |
+| Google audiences | `GOOGLE_CLIENT_ID` (web) plus `GOOGLE_CLIENT_IDS` (comma-separated Android/iOS OAuth client IDs) form an exact-match allow-list. Both the library check and our re-check require every `aud` to be in it. |
+| CORS | Sent **only** for the Capacitor origins in `APP_NATIVE_ORIGINS` (default `capacitor://localhost, https://localhost, http://localhost`). Exact match, no credentials mode, methods `GET/POST/PUT/DELETE`, headers `Authorization, Content-Type` only (no `X-CSRF-Token`), preflight max-age 600 s. Other origins get no CORS headers (preflight 403). Cookies on requests from app origins are ignored. The web app is same-origin and unchanged. In production you may narrow the list to `capacitor://localhost,https://localhost`. |
+| Watchlist (plaintext, opt-in) | See "Cloud watchlist" below. The **only** unencrypted user data: up to 10 normalized queries (role ≤ 200 chars, location ≤ 120, remote filter). It requires `consent: true` on every add. It is stored once per distinct query and shared by subscribers. It is deleted when the last subscriber removes it, on opt-out (`DELETE /api/watchlist`) and on account deletion, and it is included in export. |
+| Job history | `job_history` / `job_fingerprints` hold public job ids, a hash of company+title+location, and first/last-seen timestamps and counts. There are **no user ids and no queries**. Rows are purged after 365 days unseen. |
+| Push | Notifications carry **no content**: the title is "ApplyPilot" and the body is "N new matches — open ApplyPilot" (Web Push payloads are additionally E2E-encrypted to the browser, RFC 8291). Web Push endpoints must be `https`, default port, on an allow-listed push-service host (`PUSH_ENDPOINT_HOSTS`, an SSRF guard, re-checked at send time; redirects are not followed; 10 s timeout). Endpoints and device tokens are stored (needed to deliver), never logged and never exported. Each target is tied to the session or device that registered it, and is deleted with it, on sign-out everywhere, on account deletion, and on 404/410/unregistered responses. Max 10 targets per user and at most one "new matches" push per user per 30 min. VAPID keys are auto-generated into `<data dir>/vapid.json` (mode 0600, gitignored) if not supplied. FCM/APNs only run when configured. |
+| Limits (new endpoints) | 16 KB JSON bodies on `/auth`, `/devices`, `/sessions`, `/watchlist`, `/push`, `/jobs`, `/account`. Per-user rate limits: watchlist writes 60/15 min, history 60/min, push 30/15 min. The scheduler runs one search at a time (≥ 4 s + 0–4 s jitter apart), at most 120 per rolling hour, with a 2 h+ backoff for failing queries. |
 
 Trade-off, stated openly to users: if they lose **both** the passphrase and the recovery key, their data cannot be recovered by anyone, including us. That's the price of zero-knowledge.
 
 What the server *can* see: the Google account email, name and picture; record counts, sizes and timestamps; and job **search queries** (searches run server-side against public job APIs). Job search uses no personal data. Match scoring runs on the device.
+
+If the user opts into the **cloud watchlist**, the server also stores those few queries in plain text, which jobs each query found, and their Web Push endpoint or FCM/APNs device token. It needs these to keep searching and to notify them while their devices are off. The app must show this before enabling it. The server returns the exact wording as `privacy` from `GET /api/watchlist`.
 
 ## Shared crypto: `web/shared/vaultCrypto.js`
 
@@ -66,6 +75,39 @@ Authentication is either the session cookie (web) or `Authorization: Bearer <dev
 | `DELETE /api/devices/:id` | session | → `{ ok }` |
 | `GET /api/account/export` | session | → `{ vault, items, blobs: [ids] }` |
 | `DELETE /api/account` | session | `{ confirm: "DELETE" }` → `{ ok }` (hard delete) |
+| `POST /api/auth/google` (native) | none | `{ credential, client: 'native', platform?: 'ios'\|'android', deviceName? }` → `{ token: 'ap_s_…', user, session: { id, name, platform, expiresAt } }`, **no cookies**. `aud` may be any id in `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_IDS` |
+| `POST /api/auth/dev` (native) | dev only | `{ email, client: 'native', platform?, deviceName? }` → same as above |
+| `GET /api/me` (native) | bearer `ap_s_` | → `{ user, hasVault, session: { id, name, platform, expiresAt } }` |
+| `POST /api/auth/logout` / `logout-all` | session or `ap_s_` bearer | as above; with a bearer token it revokes that token (no cookies touched). Both also delete the push targets of what they revoke |
+| `GET /api/devices` | session | now also → `apps: [{ id, name, platform, createdAt, lastSeenAt, current }]` (signed-in phone apps) |
+| `DELETE /api/devices/:id` | session | also accepts an app id (revokes that phone's token and its push targets) |
+| `GET /api/sessions` | session | → `{ sessions: [{ id, kind: 'web'\|'native', name, platform, createdAt, lastSeenAt, expiresAt, current }] }` |
+| `DELETE /api/sessions/:id` | session | → `{ ok }` (revoke any web or app session; 404 if not yours) |
+| `GET /api/account/export` | session | now also → `watchlist: [{ id, q, location, remote, createdAt }]`, `push: [{ id, type, createdAt, lastOkAt }]` |
+| `GET /api/jobs/search` | any | each job now has `firstSeen` (ms, or null) |
+| `GET /api/jobs/history?ids=a,b` | any | → `{ [jobId]: { firstSeen, lastSeen, timesSeen, repostFirstSeen?, repostIds? } }` (unknown ids omitted; ≤ 200 ids; repeated `ids=` also works) |
+| `POST /api/jobs/history` | any | `{ ids: [...] }` → same (use for ids containing commas) |
+| `GET /api/watchlist` | any | → `{ items: [{ id, q, location, remote, createdAt, lastRunAt, nextRunAt, lastCount }], max: 10, privacy }` |
+| `POST /api/watchlist` | any | `{ q, location?, remote?: 'any'\|'remote'\|'onsite', consent: true }` → 201 `{ item, created: true }`, or 200 `{ item, created: false }` if that normalized query exists; 400 without `consent: true` (body includes `privacy`); 409 when full |
+| `DELETE /api/watchlist/:id` | any | → `{ ok }` (also drops its queued new jobs) |
+| `DELETE /api/watchlist` | any | → `{ ok, removed }` (opt out: every query, queue and cursor) |
+| `GET /api/watchlist/new?cursor=<seq>&limit=1..200` | any | → `{ jobs: [{ ...Job, firstSeen, watchId, foundAt, seq }], cursor, more }`. Pass the last `cursor` next time; passing it acknowledges everything ≤ it. Start with 0 |
+| `GET /api/push/config` | none | → `{ webPush: { publicKey } \| null, native: { fcm: bool, apns: bool } }` |
+| `POST /api/push/subscribe` | any | `{ subscription: PushSubscription.toJSON() }` → `{ id }` |
+| `DELETE /api/push/subscribe` | any | `{ endpoint }` → `{ ok, removed }`; with `{}` removes all Web Push subscriptions of this session/device |
+| `POST /api/push/native` | any | `{ platform: 'android'\|'ios', token, provider?: 'fcm'\|'apns' }` (android ⇒ fcm; ios defaults to apns, send `provider:'fcm'` if the iOS app uses Firebase) → `{ id, provider, configured }` |
+| `DELETE /api/push/native` | any | `{ token }` → `{ ok, removed }` |
+| `POST /api/push/test` | any | → `{ sent, failed, removed, skipped }` (content-free test notification to all your targets) |
+
+Native apps send `Authorization: Bearer ap_s_…` on every request and never use cookies or `X-CSRF-Token`. Don't send an `Authorization` header to the sign-in endpoints: an invalid or expired token there gets a 401. A 401 on any other call means the token is gone, so sign in again. "Session" endpoints (vault create/rewrap, link code, devices, export, delete account) accept the app token. Desktop `apd_` tokens still can't use them.
+
+### Cloud watchlist (opt-in, plaintext)
+
+- **Storage.** A query is normalized like `/api/jobs/search` (NFKC, lower-case, whitespace collapsed) and stored once, keyed by its hash, no matter how many users watch it.
+- **Schedule.** A single in-process queue checks every minute for due queries and runs them one at a time through the shared job-search cache. Each query runs every 60 min plus 0–5 min jitter, with a 4–8 s gap between searches and at most 120 searches per hour across all users. If every source fails, the query waits 2 h × failures (capped at 12 h).
+- **Baseline.** A query's first run only records what already exists. Each later run appends job ids the query has never produced to every subscriber's queue: max 50 per run, 500 per user, kept 14 days.
+- **Notify.** Then it sends at most one content-free push per user per 30 min with the unacknowledged count.
+- **Repost signal.** Every fresh search (user or scheduled) records `firstSeen` / `lastSeen` / `timesSeen` per public job id. `timesSeen` counts observations at least 30 min apart. A company+title+location fingerprint gives `repostFirstSeen` / `repostIds` when the same posting reappears under a new id.
 
 `collection` and `id` must match `^[a-zA-Z0-9_-]{1,64}$`.
 

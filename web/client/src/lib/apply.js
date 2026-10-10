@@ -1,6 +1,6 @@
 // Job actions shared by Jobs, swipe triage, job sheet and Home. All writes are encrypted records.
 import { newId } from '@shared/vaultCrypto.js';
-import { extractSkills } from '@shared/match.js';
+import { pickResume as sharedPickResume } from '@shared/campaignRules.js';
 import { safeId } from './sync.js';
 
 export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'smartrecruiters', 'recruitee'];
@@ -17,26 +17,63 @@ export function jobSnapshot(job) {
 }
 
 /** Picks the best resume for a job: role tag match > skill overlap > default (desktop pickResume). */
-export function pickResume(resumes, job, resumeId) {
-  if (!resumes.length) return null;
-  if (resumeId && resumeId !== 'auto') { const r = resumes.find((x) => x.id === resumeId); if (r) return r; }
-  if (job) {
-    const title = (job.title || '').toLowerCase();
-    const tagged = resumes.find((r) => (r.roles || []).some((role) => role && title.includes(role.toLowerCase())));
-    if (tagged) return tagged;
-    const js = new Set(extractSkills(`${job.title} ${job.description}`));
-    let best = null; let bestN = -1;
-    for (const r of resumes) { const n = (r.skills || []).filter((s) => js.has(s)).length; if (n > bestN) { best = r; bestN = n; } }
-    if (bestN > 0) return best;
-  }
-  return resumes.find((r) => r.isDefault) || resumes[0];
-}
+export function pickResume(resumes, job, resumeId) { return sharedPickResume(resumes, job, resumeId); }
 
 export function findApplication(app, job) {
   return app.applications.find((a) => a.jobId === job.id);
 }
 
-const event = (message, type = 'note') => ({ t: new Date().toISOString(), type, message });
+export const event = (message, type = 'note') => ({ t: new Date().toISOString(), type, message });
+
+/** Latest copy of an application (the store re-renders, so look it up again before writing). */
+export function getApplication(app, id) { return app.sync.get('applications', id) || app.applications.find((a) => a.id === id); }
+
+/** Merges a patch into an application (+ optional timeline event), keeping the newest copy. */
+export async function patchApplication(app, id, patch = {}, ev) {
+  const cur = getApplication(app, id);
+  if (!cur) throw new Error('Application not found');
+  const now = new Date().toISOString();
+  const events = ev ? [...(cur.events || []), typeof ev === 'string' ? event(ev, 'step') : { t: now, ...ev }].slice(-60) : cur.events;
+  const next = { ...cur, ...patch, events, updatedAt: now };
+  if (patch.status === 'applied' && !cur.appliedAt && !patch.appliedAt) {
+    next.appliedAt = now;
+    if (!next.followUpAt) next.followUpAt = new Date(Date.now() + 7 * 86400000).toISOString();
+  }
+  await app.put('applications', id, next);
+  return next;
+}
+
+/** New tracker record (desktop createApplication shape). */
+export function newApplication(job, { status = 'queued', resume, match, campaign, message, source = 'web' } = {}) {
+  const now = new Date().toISOString();
+  const m = match || job.match || null;
+  return {
+    id: newId(),
+    jobId: job.id,
+    job: jobSnapshot(job),
+    campaignId: campaign ? campaign.id : null,
+    campaignName: campaign ? campaign.name : 'Phone',
+    resumeId: resume ? resume.id : null,
+    resumeName: resume ? resume.name : null,
+    score: m ? m.score : null,
+    match: m,
+    status,
+    notes: '',
+    source,
+    events: [event(message || (status === 'queued' ? 'Queued' : `Created (${status})`), 'created')],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/** Returns the tracker entry for a job, creating it (default 'saved') if missing. */
+export async function ensureApplication(app, job, { status = 'saved', resumeId, message } = {}) {
+  const existing = findApplication(app, job);
+  if (existing) return existing;
+  const rec = newApplication(job, { status, resume: pickResume(app.resumes, job, resumeId), message: message || (status === 'saved' ? 'Saved on phone' : undefined) });
+  await app.put('applications', rec.id, rec);
+  return rec;
+}
 
 /** Creates or updates the tracker entry for a job. */
 export async function upsertApplication(app, job, status, { resumeId, message } = {}) {
@@ -44,7 +81,7 @@ export async function upsertApplication(app, job, status, { resumeId, message } 
   const existing = findApplication(app, job);
   if (existing) {
     const next = { ...existing, status, updatedAt: now, events: [...(existing.events || []), event(message || `Status → ${status}`, 'status')] };
-    if (status === 'applied' && !existing.appliedAt) next.appliedAt = now;
+    if (status === 'applied' && !existing.appliedAt) { next.appliedAt = now; if (!next.followUpAt) next.followUpAt = new Date(Date.now() + 7 * 86400000).toISOString(); }
     await app.put('applications', existing.id, next);
     return next;
   }
@@ -65,7 +102,7 @@ export async function upsertApplication(app, job, status, { resumeId, message } 
     events: [event(message || (status === 'saved' ? 'Saved on phone' : status === 'applied' ? 'Applied from phone' : status === 'skipped' ? 'Skipped on phone' : `Created (${status})`), 'created')],
     createdAt: now,
     updatedAt: now,
-    ...(status === 'applied' ? { appliedAt: now } : {}),
+    ...(status === 'applied' ? { appliedAt: now, followUpAt: new Date(Date.now() + 7 * 86400000).toISOString() } : {}),
   };
   await app.put('applications', rec.id, rec);
   return rec;

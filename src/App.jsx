@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Search, Rocket, Inbox, SquareKanban, FileText, UserRound, MessageSquareText, Globe, Wand2, Settings as SettingsIcon, Star, Crown, Loader2,
 } from 'lucide-react';
 import { useApp } from './lib/store';
+import markUrl from './assets/mark.svg';
 import { Toasts, ConfirmDialog } from './components/ui';
 import Dashboard from './pages/Dashboard';
 import Jobs from './pages/Jobs';
@@ -51,7 +52,7 @@ export default function App() {
       <div className="titlebar" />
       <aside className="sidebar">
         <div className="brand">
-          <Star size={20} className="star" fill="currentColor" />
+          <img src={markUrl} alt="" width={28} height={28} className="brand-mark" />
           <div>ApplyPilot<small>autopilot for job hunting</small></div>
         </div>
         {NAV.map((n, i) => (n.group ? <div className="nav-label" key={i}>{n.group}</div> : (

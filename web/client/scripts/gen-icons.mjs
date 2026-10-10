@@ -115,5 +115,22 @@ fs.mkdirSync(OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, 'icon-512.png'), encodePng(src.w === 512 ? src : resize(src, 512, 512)));
 fs.writeFileSync(path.join(OUT, 'icon-192.png'), encodePng(resize(src, 192, 192)));
 fs.writeFileSync(path.join(OUT, 'apple-touch-icon.png'), encodePng(onBackground(src, 180, 1)));
-fs.writeFileSync(path.join(OUT, 'icon-maskable-512.png'), encodePng(onBackground(src, 512, 0.8)));
+// Maskable: the adaptive-icon layers (assets/brand/png/foreground-1024.png over background-1024.png)
+// when present (their foreground is already inside the safe zone), else the icon at 80% on the app bg.
+const BRAND = path.resolve(here, '../../../assets/brand/png');
+const FG = path.join(BRAND, 'foreground-1024.png');
+const BG = path.join(BRAND, 'background-1024.png');
+let maskable;
+if (fs.existsSync(FG) && fs.existsSync(BG)) {
+  const fg = resize(decodePng(fs.readFileSync(FG)), 512, 512);
+  const bg = resize(decodePng(fs.readFileSync(BG)), 512, 512);
+  const out = Buffer.alloc(512 * 512 * 4);
+  for (let i = 0; i < 512 * 512; i++) {
+    const a = fg.rgba[i * 4 + 3] / 255;
+    for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.round(fg.rgba[i * 4 + c] * a + bg.rgba[i * 4 + c] * (1 - a));
+    out[i * 4 + 3] = 255;
+  }
+  maskable = { w: 512, h: 512, rgba: out };
+} else maskable = onBackground(src, 512, 0.8);
+fs.writeFileSync(path.join(OUT, 'icon-maskable-512.png'), encodePng(maskable));
 console.log(`icons written to ${path.relative(process.cwd(), OUT)} (from ${src.w}x${src.h})`);

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>ApplyPilot</title>
+  <!-- The "check-plane": a check mark whose long stroke is a folded paper plane taking off.
+       Application done → career taking off. Indigo tile for app icons (taskbar, stores). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5457ee"/>
+      <stop offset=".58" stop-color="#3730a3"/>
+      <stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="22%" cy="14%" r="70%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wingLight" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#e0e7ff"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="wingDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c7d2fe"/>
+      <stop offset="1" stop-color="#94a3fb"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0b0a2a" flood-opacity=".45"/>
+    </filter>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile)"/>
+  <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#sheen)"/>
+  <rect x="49.5" y="49.5" width="925" height="925" rx="230.5" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="3"/>
+  <g filter="url(#shadow)">
+    <path d="M254 550 L 416 700" stroke="#e0e7ff" stroke-width="96" stroke-linecap="round"/>
+    <polygon points="812,226 330,640 474,664" fill="url(#wingLight)"/>
+    <polygon points="812,226 474,664 486,780" fill="url(#wingDark)"/>
+  </g>
+</svg>

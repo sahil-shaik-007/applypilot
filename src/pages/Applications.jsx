@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser, Mail, Upload, FileText } from 'lucide-react';
+import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser, Mail, Upload, FileText, CalendarPlus } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS } from '../components/ui';
 
@@ -66,7 +66,10 @@ function AppDrawer({ a, onClose }) {
           <label className="field"><span className="field-label">Follow up on</span>
             <input type="date" className="input" value={(a.followUpAt || '').slice(0, 10)} onChange={(e) => update({ followUpAt: e.target.value ? new Date(e.target.value).toISOString() : null })} /></label>
           <label className="field"><span className="field-label">Interview date</span>
-            <input type="datetime-local" className="input" value={(a.interviewAt || '').slice(0, 16)} onChange={(e) => update({ interviewAt: e.target.value })} /></label>
+            <div className="row" style={{ gap: 6 }}>
+              <input type="datetime-local" className="input" value={(a.interviewAt || '').slice(0, 16)} onChange={(e) => update({ interviewAt: e.target.value })} />
+              <Button size="sm" icon={CalendarPlus} title="Add to calendar (.ics)" disabled={!a.interviewAt} onClick={() => app.run('applications:exportIcs', [a.id])} />
+            </div></label>
         </div>
         <label className="field"><span className="field-label">Notes</span>
           <textarea className="textarea" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={() => notes !== (a.notes || '') && update({ notes })} placeholder="Recruiter name, salary discussed, next steps…" /></label>

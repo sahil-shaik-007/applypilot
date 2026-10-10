@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Push notifications. development for Debug, production for Release (APS_ENVIRONMENT build setting). -->
+	<key>aps-environment</key>
+	<string>$(APS_ENVIRONMENT)</string>
+	<!-- Universal links. PLACEHOLDER domain: replace with the real ApplyPilot Cloud host (APP_ORIGIN)
+	     and serve /.well-known/apple-app-site-association from it (see docs/IOS.md). -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(ASSOCIATED_DOMAIN)</string>
+	</array>
+	<!-- Sign in with Apple (App Store guideline 4.8: required when Google sign-in is offered).
+	     @capgo/capacitor-social-login already ships an "apple" provider. -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>

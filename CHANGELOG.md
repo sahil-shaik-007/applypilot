@@ -2,6 +2,40 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] — 2026-10-11
+
+### Added
+- **Watch any company's careers page** (Settings → Career pages). Paste a careers link, ApplyPilot works out how the page lists its jobs and previews them before you add it:
+  - Greenhouse, Lever, Ashby, Workable, SmartRecruiters and Recruitee boards are read from their public APIs, so those jobs are auto-apply capable
+  - Workday sites are read through Workday's public job endpoint
+  - pages with schema.org JobPosting data are read directly
+  - as a last resort, job-looking links on the page are used
+  - watched pages are included in every search and campaign; each page can be refreshed, switched off or removed
+  - new modules: `electron/careerPages.js` and the `careerpages` connector. Verified live against Lever, Ashby, Greenhouse, Workday and plain-HTML pages.
+- **Interview calendar export**: "Add to calendar" writes an .ics file with a one-hour reminder (Applications drawer).
+- **Diagnostics and update check** (Settings → Data & privacy): "Export diagnostics" saves versions, settings (no keys), counts and recent errors, with no profile, resume or application contents. "Check for updates" reports the installed version.
+- **Local log file** at `%APPDATA%\ApplyPilot\logs\applypilot.log` (rotating, 2 MB) for engine, cloud and crash messages.
+- **New logo: "check-plane"**, a check mark whose long stroke is a paper plane. See docs/BRAND.md.
+- **Mobile projects** (see docs/MOBILE.md, docs/IOS.md, docs/ANDROID.md):
+  - Capacitor 8 wraps the web app as `web/client/android` and `web/client/ios`
+  - the iOS project builds and launches in the Simulator on GitHub's macOS runners (`.github/workflows/ios.yml`, branch `ci/ios-build`)
+  - the Android debug APK builds locally
+- **ApplyPilot Cloud (server)**:
+  - native sign-in tokens for the mobile apps (`POST /api/auth/google` with `client:'native'`), with per-session separation from browser cookies
+  - a cloud watchlist: saved searches the server re-runs hourly, with a consent step and privacy text; new matches are queued for the app
+  - ghost-job signal: `firstSeen`, repost detection and job history per id, with no user data
+  - web and mobile push (Web Push, FCM, APNs) that never carries job content; each push target is removed with its session
+  - 110 server tests pass (1 live test skipped)
+
+### Changed
+- Settings → "Company boards" is now **Career pages**. The ATS-slug adder stays below it.
+- The window minimum, taskbar fit and version are unchanged from 1.2.0.
+
+### Not finished in 1.3.0 (tracked in docs/STATUS.md)
+- The browser extension and desktop bridge exist as files but are not connected to the app yet (no pairing screen, no `startBridge` in the main process).
+- The Workday, Recruitee and other new ATS connectors are not registered as standalone sources; Workday is used only by the career-pages reader.
+- The Android and iOS apps are not published (no store listings, no signing secrets set, no Sign in with Apple yet). Mobile e2e was not run for this release.
+
 ## [1.2.0] — 2026-10-06
 
 ### Fixed

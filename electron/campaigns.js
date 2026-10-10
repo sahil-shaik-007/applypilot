@@ -32,6 +32,7 @@ function similarity(a, b) {
 class CampaignManager {
   constructor({ store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir }) {
     Object.assign(this, { store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir });
+    this.careerPages = () => (this.store.careerPages ? this.store.careerPages.get().items : []);
     this.runners = new Map(); // campaignId -> AbortController
     this.applying = new Map(); // applicationId -> AbortController
     this.pendingSubmits = new Map(); // applicationId -> resolve(boolean) during the cancel window
@@ -147,7 +148,7 @@ class CampaignManager {
       for (const loc of locations) {
         const { jobs, stats: st } = await searchAll(
           { query: role, location: loc, remote: c.remote || 'any', limit: 80 },
-          { sources: c.sources && c.sources.length ? c.sources : s.enabledSources, keys: s.keys, companies: this.companies(), onProgress },
+          { sources: c.sources && c.sources.length ? c.sources : s.enabledSources, keys: s.keys, companies: this.companies(), careerPages: this.careerPages(), onProgress },
         );
         jobs.forEach((j) => merged.set(j.id, j));
         stats.push(...st);

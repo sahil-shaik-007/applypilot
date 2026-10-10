@@ -1,4 +1,13 @@
-# ApplyPilot ★ — your job hunt, on autopilot
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark.png">
+    <img alt="ApplyPilot" src="assets/brand/wordmark-light.png" width="420">
+  </picture>
+</p>
+
+<h1 align="center">Your job hunt, on autopilot</h1>
+
+<p align="center"><b>Windows · iOS · Android · Web</b> — every job board, ranked to your resume, applied with the right resume — privately.</p>
 
 ApplyPilot is a Windows desktop app that searches **every job board at once**, ranks each job against **your resume**, and fills in applications for you — running **several role-specific campaigns in parallel**, each with its own resume.
 

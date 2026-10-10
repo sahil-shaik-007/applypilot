@@ -91,7 +91,7 @@ function getEngine() {
         // Always visible: review/assisted tabs must be seen by the user. (Hidden only for automated tests.)
         return { browserChannel: s.browserChannel, browserPath: s.browserPath, headless: process.env.APPLYPILOT_HEADLESS === '1', maxParallelBrowsers: Math.min(s.maxParallelBrowsers, getPlan().parallelBrowsers), humanDelays: s.humanDelays, slowMo: 0 };
       },
-      log: (m) => console.log('[engine]', m),
+      log: (m) => { console.log('[engine]', m); logToFile('info', `[engine] ${m}`); },
     });
   } catch (e) {
     console.error('Apply engine failed to load', e);
@@ -103,6 +103,22 @@ function getEngine() {
 function emit(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send('event', { channel, payload });
 }
+// ---------- local log file (no personal data: messages are app events/errors only) ----------
+const logLines = [];
+function logToFile(level, msg) {
+  const line = `${new Date().toISOString()} [${level}] ${String(msg).replace(/[\r\n]+/g, ' ').slice(0, 2000)}`;
+  logLines.push(line); if (logLines.length > 2000) logLines.shift();
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'applypilot.log');
+    if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) fs.renameSync(file, path.join(dir, 'applypilot.1.log'));
+    fs.appendFileSync(file, line + '\n');
+  } catch { /* logging must never crash the app */ }
+}
+process.on('uncaughtException', (e) => logToFile('error', `uncaught: ${e && e.stack ? e.stack : e}`));
+process.on('unhandledRejection', (e) => logToFile('error', `unhandled: ${e && e.stack ? e.stack : e}`));
+
 function notify(title, body) {
   if (!store.settings.get().notifications || !Notification.isSupported()) return;
   const n = new Notification({ title, body, icon: getIcon(), silent: false });
@@ -272,7 +288,7 @@ function registerIpc() {
     const searchId = params.searchId || crypto.randomUUID();
     const { jobs, stats } = await searchAll(
       { query: params.query, location: params.location || '', remote: params.remote || 'any', limit: 80 },
-      { sources: params.sources && params.sources.length ? params.sources : s.enabledSources, keys: s.keys, companies: companies(), onProgress: (p) => emit('search:progress', { searchId, ...p }) },
+      { sources: params.sources && params.sources.length ? params.sources : s.enabledSources, keys: s.keys, companies: companies(), careerPages: store.careerPages.get().items, onProgress: (p) => emit('search:progress', { searchId, ...p }) },
     );
     const scored = jobs.map((job) => {
       const resume = resumeLib.pickResume(store, { job });
@@ -445,6 +461,91 @@ function registerIpc() {
   handle('cloud:link', (o) => cloud.link(o));
   handle('cloud:unlink', () => cloud.unlink());
   handle('cloud:sync', () => cloud.syncNow());
+  // ---- About / updates / diagnostics
+  handle('app:about', () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: `${os.platform()} ${os.release()}`, arch: process.arch, packaged: app.isPackaged }));
+  handle('app:checkUpdates', async () => {
+    if (!app.isPackaged) return { status: 'dev', message: 'Updates are checked in installed builds only.' };
+    try {
+      const { autoUpdater } = require('electron-updater');
+      const r = await autoUpdater.checkForUpdates();
+      const latest = r && r.updateInfo ? r.updateInfo.version : null;
+      if (latest && latest !== app.getVersion()) return { status: 'available', version: latest, message: `Version ${latest} is downloading — it installs when you restart ApplyPilot.` };
+      return { status: 'latest', version: app.getVersion(), message: `You're on the latest version (${app.getVersion()}).` };
+    } catch (e) { logToFile('warn', `update check failed: ${e.message}`); return { status: 'error', message: 'Could not check for updates right now.' }; }
+  });
+  handle('app:exportDiagnostics', async () => {
+    const r = await dialog.showSaveDialog(win, { title: 'Save diagnostics for support', defaultPath: `applypilot-diagnostics-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (r.canceled) return false;
+    const s = store.settings.get();
+    const counts = { resumes: store.resumes.get().items.length, campaigns: store.campaigns.get().items.length, applications: store.applications.get().items.length, qa: store.qa.get().items.length, jobsCached: Object.keys(store.jobs.get().items).length };
+    const byStatus = {};
+    for (const a of store.applications.get().items) byStatus[a.status] = (byStatus[a.status] || 0) + 1;
+    const diag = {
+      generatedAt: new Date().toISOString(), version: app.getVersion(), electron: process.versions.electron, platform: `${os.platform()} ${os.release()} ${process.arch}`,
+      plan: getPlan().plan, settings: { ...s, keys: Object.fromEntries(Object.keys(s.keys || {}).map((k) => [k, s.keys[k] ? 'set' : ''])), windowState: undefined },
+      counts, applicationsByStatus: byStatus, connectors: listConnectors(getSettings().keys).map((c) => ({ id: c.id, ready: c.ready })),
+      cloud: cloud ? (({ linked, serverUrl, lastSyncAt, lastError }) => ({ linked, serverUrl, lastSyncAt, lastError }))(cloud.status()) : null,
+      recentLog: logLines.slice(-300),
+      note: 'Contains no profile, resume, application contents, API keys or license key.',
+    };
+    fs.writeFileSync(r.filePath, JSON.stringify(diag, null, 1));
+    return r.filePath;
+  });
+  // Interview → calendar file (.ics) that Outlook/Google/Apple Calendar can import.
+  handle('applications:exportIcs', async (id) => {
+    const a = store.applications.get().items.find((x) => x.id === id);
+    if (!a || !a.interviewAt) throw new Error('Set an interview date first.');
+    const start = new Date(a.interviewAt);
+    const end = new Date(start.getTime() + 60 * 60000);
+    const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const esc = (t) => String(t || '').replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\n/g, '\\n');
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ApplyPilot//EN', 'BEGIN:VEVENT', `UID:${a.id}@applypilot`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`,
+      `SUMMARY:${esc(`Interview: ${a.job.title} at ${a.job.company}`)}`, `DESCRIPTION:${esc(`${a.job.applyUrl || a.job.url || ''}\n${a.notes || ''}`)}`,
+      'BEGIN:VALARM', 'TRIGGER:-PT60M', 'ACTION:DISPLAY', 'DESCRIPTION:Interview in 1 hour', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const r = await dialog.showSaveDialog(win, { title: 'Save interview to calendar', defaultPath: `interview-${(a.job.company || 'company').replace(/[^\w-]+/g, '_')}.ics`, filters: [{ name: 'Calendar', extensions: ['ics'] }] });
+    if (r.canceled) return false;
+    fs.writeFileSync(r.filePath, ics);
+    shell.openPath(r.filePath);
+    return r.filePath;
+  });
+  // ---- Career pages: watch ANY company's careers page (see electron/careerPages.js)
+  const careerLib = () => require('./careerPages');
+  const cpPublic = (p) => ({ ...p, jobsPreview: undefined });
+  handle('careerPages:list', () => store.careerPages.get().items.map(cpPublic));
+  handle('careerPages:inspect', async (url) => {
+    let u;
+    try { u = new URL(String(url || '').trim()); } catch { throw new Error('Paste a full careers page link, e.g. https://company.com/careers'); }
+    if (!/^https?:$/.test(u.protocol)) throw new Error('Only http(s) links are supported.');
+    const r = await careerLib().inspect(u.href);
+    return { ...r, jobsPreview: (r.jobsPreview || []).slice(0, 10).map((j) => ({ id: j.id, title: j.title, location: j.location, url: j.url, ats: j.ats })) };
+  });
+  handle('careerPages:add', async (config) => {
+    if (!config || !config.url) throw new Error('Inspect the page first.');
+    if (store.careerPages.get().items.some((p) => p.url === config.url)) throw new Error('This careers page is already being watched.');
+    const page = { ...config, jobsPreview: undefined, id: crypto.randomUUID(), addedAt: new Date().toISOString(), lastChecked: null, jobCount: (config.jobsPreview || []).length || config.jobCount || 0 };
+    store.careerPages.update((d) => { d.items.push(page); });
+    return store.careerPages.get().items.map(cpPublic);
+  });
+  handle('careerPages:update', (id, patch) => {
+    store.careerPages.update((d) => { const p = d.items.find((x) => x.id === id); if (p) Object.assign(p, (({ company, enabled }) => ({ company, enabled }))({ ...p, ...patch })); });
+    return store.careerPages.get().items.map(cpPublic);
+  });
+  handle('careerPages:remove', (id) => { store.careerPages.update((d) => { d.items = d.items.filter((x) => x.id !== id); }); return store.careerPages.get().items.map(cpPublic); });
+  // Fetch every job on one watched page now, score it, and add it to the Jobs list.
+  handle('careerPages:refresh', async (id) => {
+    const page = store.careerPages.get().items.find((x) => x.id === id);
+    if (!page) throw new Error('Careers page not found');
+    const jobs = await careerLib().fetchJobs(page, { query: '', location: '', remote: 'any', limit: 300 });
+    const profile = store.profile.get().values || {};
+    store.jobs.update((d) => {
+      for (const j of jobs) {
+        const resume = resumeLib.pickResume(store, { job: j });
+        d.items[j.id] = { ...j, match: scoreJob(j, { resumeText: resume ? resume.text : '', profile }), firstSeen: d.items[j.id]?.firstSeen || new Date().toISOString(), campaignIds: d.items[j.id]?.campaignIds || [] };
+      }
+    });
+    store.careerPages.update((d) => { const p = d.items.find((x) => x.id === id); if (p) { p.lastChecked = new Date().toISOString(); p.jobCount = jobs.length; p.lastError = null; } });
+    return { count: jobs.length, jobs: jobsForUi({ ids: jobs.map((j) => j.id) }), pages: store.careerPages.get().items.map(cpPublic) };
+  });
   handle('activity:clear', () => { store.activity.update((d) => { d.items = []; }); return true; });
   // Privacy: wipe every ApplyPilot file on this PC (profile, resumes, applications, keys, browser profile) and restart fresh.
   handle('data:reset', async () => {
@@ -603,7 +704,7 @@ app.whenReady().then(() => {
   store.license.update((d) => { if (!d.trialStartedAt && !d.key) d.trialStartedAt = new Date().toISOString(); });
   manager = new CampaignManager({ store, getEngine, ai, getPlan, emit, notify, companies, tailoredDir: path.join(app.getPath('userData'), 'resumes', 'tailored') });
   manager.settings = () => getSettings();
-  cloud = new CloudSync({ store, manager, emit, notify, encrypt: enc, decrypt: dec, log: (m) => console.log(m), deviceName: `ApplyPilot desktop — ${os.hostname()}` });
+  cloud = new CloudSync({ store, manager, emit, notify, encrypt: enc, decrypt: dec, log: (m) => logToFile('info', `[cloud] ${m}`), deviceName: `ApplyPilot desktop — ${os.hostname()}` });
   cloud.start();
   setTimeout(() => cloud.syncNow().catch(() => {}), 8000);
   registerIpc();

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Acme - Backend Engineer</title>
+<style>body{font:15px system-ui,sans-serif;margin:0;padding:16px;max-width:640px}
+li.application-question{list-style:none;margin:12px 0}.application-label{font-weight:600;display:block}
+input[type=text],input[type=email],textarea{width:100%;box-sizing:border-box;padding:8px}
+.dropdown-results{border:1px solid #ccc}.dropdown-location{padding:6px;cursor:pointer}</style></head>
+<body>
+<div class="posting-header"><h2>Backend Engineer</h2><input type="text" placeholder="Search jobs" name="search-header"></div>
+<form id="application-form" data-thanks method="post" action="/apply">
+<ul>
+  <li class="application-question"><label><div class="application-label">Resume/CV<span class="required">✱</span></div>
+    <input type="file" name="resume" id="resume-upload-input" required></label></li>
+  <li class="application-question"><label><div class="application-label">Full name<span class="required">✱</span></div><input type="text" name="name" required></label></li>
+  <li class="application-question"><label><div class="application-label">Email<span class="required">✱</span></div><input type="email" name="email" required></label></li>
+  <li class="application-question"><label><div class="application-label">Phone</div><input type="text" name="phone"></label></li>
+  <li class="application-question"><label><div class="application-label">Current location</div>
+    <input type="text" name="location" id="location-input" autocomplete="off"></label>
+    <div class="dropdown-results" id="loc-results"></div><input type="hidden" name="selectedLocation"></li>
+  <li class="application-question"><label><div class="application-label">Current company</div><input type="text" name="org"></label></li>
+  <li class="application-question"><label><div class="application-label">LinkedIn URL</div><input type="text" name="urls[LinkedIn]"></label></li>
+  <li class="application-question"><label><div class="application-label">GitHub URL</div><input type="text" name="urls[GitHub]"></label></li>
+  <li class="application-question"><div class="application-label">Are you willing to relocate?<span class="required">✱</span></div>
+    <ul><li><label><input type="radio" name="cards[relocate]" value="Yes" required> Yes</label></li><li><label><input type="radio" name="cards[relocate]" value="No"> No</label></li></ul></li>
+  <li class="application-question"><div class="application-label">Which languages do you speak? (check all that apply)</div>
+    <ul><li><label><input type="checkbox" name="cards[lang]" value="English"> English</label></li><li><label><input type="checkbox" name="cards[lang]" value="Hindi"> Hindi</label></li><li><label><input type="checkbox" name="cards[lang]" value="German"> German</label></li></ul></li>
+  <li class="application-question"><label><div class="application-label">How many years of experience do you have with React?<span class="required">✱</span></div><input type="text" name="cards[react]" required></label></li>
+  <li class="application-question"><label><div class="application-label">Describe a time you disagreed with a product decision.<span class="required">✱</span></div><textarea name="cards[story]" required></textarea></label></li>
+</ul>
+<button type="submit" id="btn-submit" class="template-btn-submit">Submit application</button>
+</form>
+<div class="main-footer"><input type="email" name="newsletter" placeholder="Newsletter"></div>
+<script>
+  var loc = document.getElementById('location-input'); var res = document.getElementById('loc-results');
+  loc.addEventListener('input', function () {
+    var v = loc.value; setTimeout(function () {
+      if (loc.value !== v) return; res.innerHTML = '';
+      if (v.length < 2) return;
+      ['San Francisco, CA, United States', 'San Mateo, CA, United States'].filter(function (c) { return c.toLowerCase().indexOf(v.slice(0, 3).toLowerCase()) === 0; }).forEach(function (c) {
+        var d = document.createElement('div'); d.className = 'dropdown-location'; d.textContent = c;
+        d.addEventListener('click', function () { loc.value = c; document.querySelector('[name=selectedLocation]').value = c; res.innerHTML = ''; });
+        res.appendChild(d);
+      });
+    }, 250);
+  });
+</script>
+<script src="/widgets.js"></script>
+</body></html>

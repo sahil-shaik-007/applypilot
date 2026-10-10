@@ -7,6 +7,7 @@ import { api } from '../lib/api.js';
 import { Button, Seg, Empty, Switch, Progress, Sheet } from '../components/ui.jsx';
 import { JobCard, JobSheet, SwipeDeck } from '../components/jobs.jsx';
 import { AUTO_ATS } from '../lib/apply.js';
+import { rememberJobs } from '../lib/insights.js';
 
 // Last search lives in memory only (public job data; cleared on reload/lock).
 let lastSearch = null;
@@ -50,6 +51,7 @@ export default function Jobs({ params }) {
       const qs = new URLSearchParams({ q: query.trim(), location: location.trim(), remote });
       const r = await api(`/jobs/search?${qs}`);
       const jobs = Array.isArray(r.jobs) ? r.jobs : [];
+      rememberJobs(jobs);
       lastSearch = { q: query.trim(), location: location.trim(), remote, jobs, stats: r.stats || null, at: Date.now() };
       setRaw(jobs); setStats(r.stats || null);
       setView(isPhone() ? 'swipe' : 'list');

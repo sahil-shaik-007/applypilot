@@ -12,6 +12,8 @@ RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY web/shared /app/web/shared
 # gen-icons.mjs (npm run build) renders the PWA icons from the desktop icon
 COPY build/icon.png /app/build/icon.png
+# the PWA imports electron/data/profile-schema.json (vite alias @schema)
+COPY electron/data /app/electron/data
 COPY web/client/ ./
 RUN npm run build
 

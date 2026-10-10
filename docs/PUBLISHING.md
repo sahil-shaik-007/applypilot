@@ -176,8 +176,10 @@ If you buy a certificate that comes as a `.pfx` (rare now), save it as secrets a
 Tile images are in `build/appx/` (rendered from the new logo by `node scripts/release.js appx-assets`; re-run it if
 the logo changes).
 
-**Local APPX builds** need `makeappx.exe`. electron-builder uses the copy in its downloaded `winCodeSign` bundle, and
-CI's `windows-latest` has the Windows SDK. An unsigned local `.appx` can't be installed by double-click; that's
+**Build the `.appx` in CI, not locally.** electron-builder runs the `makeappx.exe` from its downloaded `winCodeSign`
+bundle. On the dev PC (Windows 11 build 26220, no Windows SDK) that copy fails with "side-by-side configuration is
+incorrect" (`spawn UNKNOWN`). Also, without Developer Mode, unpacking the bundle hits symlink errors (harmless). The
+`windows-latest` runner builds it fine (about 30 s). An unsigned `.appx` can't be installed by double-click; that's
 expected, since the Store signs it.
 
 ## 5. winget (Day 2–3, after the first **public** release)

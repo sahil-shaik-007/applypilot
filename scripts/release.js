@@ -152,7 +152,7 @@ function parseLatestYml(text) {
     let m;
     if ((m = line.match(/^\s*-\s*url:\s*(.+)$/))) { cur = { url: m[1].trim() }; out.files.push(cur); }
     else if (cur && (m = line.match(/^\s+(sha512|size):\s*(.+)$/))) cur[m[1]] = m[2].trim();
-    else if ((m = line.match(/^(\w+):\s*(.*)$/))) { cur = null; out[m[1]] = m[2].trim().replace(/^'|'$/g, ''); }
+    else if ((m = line.match(/^(\w+):\s*(.*)$/)) && m[1] !== 'files') { cur = null; out[m[1]] = m[2].trim().replace(/^'|'$/g, ''); }
   }
   return out;
 }

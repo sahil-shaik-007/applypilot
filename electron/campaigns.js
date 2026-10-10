@@ -7,6 +7,7 @@ const { scoreJob, isExcluded } = require('./match');
 const fs = require('fs');
 const { pickResume } = require('./resume');
 const tailoredResume = require('./tailoredResume');
+const { isCurrentEmployer, matchesWindow } = require('./jobFilters');
 
 const today = () => new Date().toISOString().slice(0, 10);
 const sleep = (ms, signal) => new Promise((resolve) => {
@@ -22,6 +23,10 @@ function fillTemplate(tpl, job, profile) {
 }
 
 function tokens(s) { return new Set((s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length > 2)); }
+// Compact per-source record stored on the campaign: where this run's jobs came from.
+function sourceStats(stats = []) {
+  return stats.map((x) => ({ id: x.id, name: x.name, count: x.count || 0, error: x.error || null, ms: x.ms || 0 }));
+}
 function similarity(a, b) {
   const A = tokens(a); const B = tokens(b);
   if (!A.size || !B.size) return 0;
@@ -87,13 +92,22 @@ class CampaignManager {
     }
     return sameCompany >= 2;
   }
-  canUseAi() {
+  // Cloud (Anthropic key) or a local model server; both count against the plan's daily AI allowance.
+  aiReady() {
     const s = this.settings();
-    if (!s.keys.anthropic) return false;
+    return s.aiProvider === 'local' ? !!(s.localAi && s.localAi.model) : !!s.keys.anthropic;
+  }
+  canUseAi() {
+    if (!this.aiReady()) return false;
     if (this.aiUsage.day !== today()) this.aiUsage = { day: today(), count: 0 };
     return this.aiUsage.count < this.getPlan().aiPerDay;
   }
-  aiArgs() { const s = this.settings(); this.aiUsage.count++; return { apiKey: s.keys.anthropic, model: s.aiModel }; }
+  aiArgs() {
+    const s = this.settings();
+    this.aiUsage.count++;
+    if (s.aiProvider === 'local') return { provider: 'local', localBaseUrl: s.localAi.baseUrl, localModel: s.localAi.model };
+    return { provider: 'anthropic', apiKey: s.keys.anthropic, model: s.aiModel };
+  }
 
   // ---------- lifecycle ----------
   resumeAll() {
@@ -161,18 +175,24 @@ class CampaignManager {
     const profile = this.profile();
     this.patchCampaign(c.id, { phase: 'searching', lastRunAt: new Date().toISOString(), lastError: null, progress: { sources: 0, found: 0 } });
     let srcDone = 0; let foundSoFar = 0;
-    const { jobs } = await this.search(c, (p) => {
+    const { jobs, stats } = await this.search(c, (p) => {
       srcDone++; foundSoFar += p.count;
       this.patchCampaign(c.id, { progress: { sources: srcDone, found: foundSoFar } });
     });
     if (signal.aborted) return;
 
-    this.patchCampaign(c.id, { phase: 'scoring' });
+    this.patchCampaign(c.id, { phase: 'scoring', lastSourceStats: sourceStats(stats), lastSourcesAt: new Date().toISOString() });
     const fresh = [];
     let skipped = 0;
+    let employerSkipped = 0;
+    await this.sweepClosed(c, signal).catch(() => {});
     const include = (c.includeKeywords || []).map((k) => k.toLowerCase());
     for (const job of jobs) {
       if (this.alreadyHandled(job)) continue;
+      // Never apply at the company you work for today.
+      if (isCurrentEmployer(job, profile)) { skipped++; employerSkipped++; continue; }
+      // Country / posted-date / month filters chosen on the campaign.
+      if (!matchesWindow(job, { countries: c.countries, postedWithinDays: c.postedWithinDays, postedMonths: c.postedMonths })) { skipped++; continue; }
       const excluded = isExcluded(job, { profile, campaign: c });
       if (excluded) { skipped++; continue; }
       if (include.length && !include.some((k) => `${job.title} ${job.description}`.toLowerCase().includes(k))) { skipped++; continue; }
@@ -197,7 +217,7 @@ class CampaignManager {
     const minScore = Number(c.minScore ?? this.settings().minMatchScore ?? 55);
     const good = fresh.filter((x) => x.match.score >= minScore && !x.match.flags.some((f) => /scam/i.test(f)))
       .sort((a, b) => b.match.score - a.match.score);
-    this.patchCampaign(c.id, (cur) => ({ stats: { ...(cur.stats || {}), found: (cur.stats?.found || 0) + brandNew.length, skipped: (cur.stats?.skipped || 0) + brandNew.filter((x) => x.match.score < minScore).length } }));
+    this.patchCampaign(c.id, (cur) => ({ stats: { ...(cur.stats || {}), found: (cur.stats?.found || 0) + brandNew.length, skipped: (cur.stats?.skipped || 0) + brandNew.filter((x) => x.match.score < minScore).length, currentEmployerSkipped: (cur.stats?.currentEmployerSkipped || 0) + employerSkipped } }));
     this.log('search', `"${c.name}": ${jobs.length} jobs found, ${good.length} new matches ≥ ${minScore}%`, { campaignId: c.id });
 
     if (!good.length) return;
@@ -228,6 +248,29 @@ class CampaignManager {
       }
     };
     await Promise.all([worker(), worker()]);
+  }
+
+  // Queued jobs can be taken down before you act on them. Re-check a few at a time (each at most every
+  // 6 hours) and move closed postings out of the queue, so you never review a job that is no longer open.
+  async sweepClosed(c, signal) {
+    const cutoff = Date.now() - 6 * 3600000;
+    const due = this.store.applications.get().items
+      .filter((a) => a.campaignId === c.id && a.status === 'queued' && (!a.openCheckedAt || new Date(a.openCheckedAt).getTime() < cutoff))
+      .slice(0, 20);
+    let closed = 0;
+    for (const a of due) {
+      if (signal && signal.aborted) break;
+      const open = await require('./liveness').isStillOpen({ ...a.job, id: a.jobId }).catch(() => null);
+      const now = new Date().toISOString();
+      if (open === false) {
+        this.patchApp(a.id, { status: 'skipped', openCheckedAt: now }, { type: 'closed', message: 'This posting was closed before you applied — removed from your queue' });
+        closed++;
+      } else {
+        this.store.applications.update((d) => { const x = d.items.find((i) => i.id === a.id); if (x) x.openCheckedAt = now; });
+      }
+    }
+    if (closed) this.log('closed', `"${c.name}": ${closed} queued job(s) were already closed and were removed`, { campaignId: c.id });
+    return closed;
   }
 
   createApplication({ job, match, resume, campaign, status = 'queued' }) {
@@ -449,4 +492,4 @@ class CampaignManager {
   }
 }
 
-module.exports = { CampaignManager };
+module.exports = { CampaignManager, sourceStats };

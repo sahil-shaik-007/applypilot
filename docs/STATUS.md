@@ -1,6 +1,6 @@
-# ApplyPilot — status (v1.3.0, 11 Oct 2026)
+# ApplyPilot — status (v1.4.0, 11 Oct 2026)
 
-**Installer:** `release/ApplyPilot-Setup-1.3.0.exe` (~115 MB, per-user NSIS install). Run `npm run dist` to rebuild.
+**Installer:** `release/ApplyPilot-Setup-1.4.0.exe` (~115 MB, per-user NSIS install). Run `npm run dist` to rebuild.
 
 **Automated tests:** desktop E2E 65/65, phone↔desktop sync 10/10, engine self-test 8/8, cloud server 64 passing, vault crypto 9/9. See [TESTING.md](TESTING.md).
 

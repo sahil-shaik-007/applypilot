@@ -107,7 +107,7 @@ export default function ReviewQueue() {
         {queued.length ? (
           <div className="card" style={{ overflow: 'hidden' }}>
             <table className="table">
-              <thead><tr><th style={{ width: 36 }} /><th>Match</th><th>Role</th><th>Salary</th><th>Campaign</th><th>Resume</th><th>Found</th><th /></tr></thead>
+              <thead><tr><th style={{ width: 36 }} /><th>Match</th><th>Role</th><th>Salary</th><th>Campaign</th><th>Source</th><th>Resume</th><th>Found</th><th /></tr></thead>
               <tbody>
                 <AnimatePresence>
                   {queued.slice(0, limit).map((a) => (
@@ -120,6 +120,7 @@ export default function ReviewQueue() {
                       </td>
                       <td className="small">{salary(a.job)}</td>
                       <td className="small muted">{a.campaignName}</td>
+                      <td className="small"><span className="badge" title={`Found on ${(app.connectors.find((c) => c.id === a.job.source) || {}).name || a.job.source || 'an unknown source'}`}>{(app.connectors.find((c) => c.id === a.job.source) || {}).name || a.job.source || 'Other'}</span></td>
                       <td>
                         <select className="select" style={{ height: 30, fontSize: 13, width: 170 }} value={a.resumeId || ''} onChange={(e) => setResume(a.id, e.target.value)}>
                           {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}

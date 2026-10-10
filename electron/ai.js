@@ -17,7 +17,58 @@ function getClient(apiKey) {
   return client;
 }
 
-async function call({ apiKey, model, system, prompt, maxTokens = 4000, effort = 'low', schema }) {
+// ---- Local models: any OpenAI-compatible server on the PC or LAN (Ollama, LM Studio, llama.cpp, vLLM).
+// The candidate's data only goes to the base URL the user typed in Settings.
+const LOCAL_DEFAULT_URL = 'http://localhost:11434/v1';
+function localBase(url) {
+  let u;
+  try { u = new URL(String(url || LOCAL_DEFAULT_URL).trim()); } catch { throw new Error('The local AI address must start with http:// or https://, e.g. http://localhost:11434/v1'); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error('The local AI address must start with http:// or https://.');
+  return u.href.replace(/\/+$/, '');
+}
+// Models often wrap JSON in prose or code fences; take the outermost object.
+function extractJson(text) {
+  const t = String(text || '').trim();
+  try { return JSON.parse(t); } catch { /* fall through */ }
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch { /* fall through */ } }
+  throw new Error('The local model did not return the expected JSON. Try a larger or instruction-tuned model.');
+}
+async function localChat({ baseUrl, model, system, prompt, maxTokens = 4000, schema }) {
+  if (!model) throw new Error('Choose a local model name in Settings → AI first (run `ollama list` to see yours).');
+  const url = `${localBase(baseUrl)}/chat/completions`;
+  const messages = [
+    { role: 'system', content: `${system || SYSTEM}${schema ? `
+Respond with only a JSON object matching this JSON Schema, no prose:
+${JSON.stringify(schema)}` : ''}` },
+    { role: 'user', content: prompt },
+  ];
+  const post = async (body) => {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(240000) });
+    if (!res.ok) { const err = new Error(`Local AI returned HTTP ${res.status}`); err.status = res.status; throw err; }
+    return res.json();
+  };
+  const base = { model, messages, max_tokens: maxTokens, temperature: 0.2, stream: false };
+  let data;
+  try {
+    data = await post(schema ? { ...base, response_format: { type: 'json_object' } } : base);
+  } catch (e) {
+    if (e.status && e.status !== 400) throw new Error(`${e.message}. Is the local AI server running at ${localBase(baseUrl)}?`);
+    if (e.status === 400 && schema) data = await post(base); else if (e.status) throw e; else throw new Error(`Can't reach the local AI at ${localBase(baseUrl)}. Start Ollama or LM Studio and try again.`);
+  }
+  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+  if (!text.trim()) throw new Error('The local model returned an empty answer.');
+  return schema ? extractJson(text) : text.trim();
+}
+async function localModels(baseUrl) {
+  const res = await fetch(`${localBase(baseUrl)}/models`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  if (!res || !res.ok) throw new Error(`Can't reach the local AI at ${localBase(baseUrl)}. Start Ollama or LM Studio, then try again.`);
+  const data = await res.json();
+  return (data.data || []).map((m) => m.id).filter(Boolean);
+}
+
+async function call({ apiKey, model, system, prompt, maxTokens = 4000, effort = 'low', schema, provider, localBaseUrl, localModel }) {
+  if (provider === 'local') return localChat({ baseUrl: localBaseUrl, model: localModel, system: system || SYSTEM, prompt, maxTokens, schema });
   const c = getClient(apiKey);
   const params = {
     model,
@@ -230,4 +281,31 @@ async function testKey({ apiKey, model }) {
   return true;
 }
 
-module.exports = { MODELS, coverLetter, answerQuestion, tailorResume, tailoredResumeDoc, parseResume, interviewPrep, outreach, testKey, errMessage };
+// Plain-English request -> a plan the app can check against real job boards. The model only proposes
+// company names, role words and filters; every job it leads to must come from a live source.
+const PLAN_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, careersUrl: { type: 'string' } }, required: ['name', 'careersUrl'], additionalProperties: false } },
+    roles: { type: 'array', items: { type: 'string' } },
+    requireVisaSponsorship: { type: 'boolean' },
+    countries: { type: 'array', items: { type: 'string' } },
+    note: { type: 'string' },
+  },
+  required: ['companies', 'roles', 'requireVisaSponsorship', 'countries', 'note'],
+  additionalProperties: false,
+};
+async function planDiscovery(o) {
+  return call({
+    ...o,
+    system: "You turn a job seeker's request into a search plan. You never invent job openings. Company careers URLs are only suggestions; leave careersUrl empty when you are not sure of the exact page.",
+    schema: PLAN_SCHEMA,
+    effort: 'low',
+    maxTokens: 1500,
+    prompt: `Request: "${String(o.prompt || '').slice(0, 1000)}"
+
+Extract: the companies named (or implied), the job titles or role words, whether visa sponsorship is required, and any countries. Use short role words (e.g. "data analyst"). Put each company's public careers page URL only if you are confident of it.`,
+  });
+}
+
+module.exports = { MODELS, coverLetter, answerQuestion, tailorResume, tailoredResumeDoc, parseResume, interviewPrep, outreach, testKey, errMessage, localModels, planDiscovery, LOCAL_DEFAULT_URL };

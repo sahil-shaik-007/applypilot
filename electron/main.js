@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { createStore } = require('./store');
 const { listConnectors, searchAll } = require('./connectors');
 const { scoreJob, isExcluded, displaySkill } = require('./match');
+const { isCurrentEmployer, countryOf, COUNTRIES } = require('./jobFilters');
 const resumeLib = require('./resume');
 const ai = require('./ai');
 const license = require('./license');
@@ -200,7 +201,7 @@ function handle(channel, fn) {
 function jobsForUi(filter = {}) {
   const items = Object.values(store.jobs.get().items);
   const applied = new Map(store.applications.get().items.map((a) => [a.jobId, a.status]));
-  let list = items.map((j) => ({ ...j, description: (j.description || '').slice(0, 4000), appStatus: applied.get(j.id) || null }));
+  let list = items.map((j) => ({ ...j, description: (j.description || '').slice(0, 4000), appStatus: applied.get(j.id) || null, country: countryOf(j) }));
   if (filter.campaignId) list = list.filter((j) => (j.campaignIds || []).includes(filter.campaignId));
   if (filter.ids) { const s = new Set(filter.ids); list = list.filter((j) => s.has(j.id)); }
   list.sort((a, b) => (b.match?.score || 0) - (a.match?.score || 0));
@@ -221,6 +222,7 @@ function registerIpc() {
     plan: getPlan(),
     connectors: listConnectors(getSettings().keys),
     aiModels: ai.MODELS,
+    countries: COUNTRIES,
     platformUsage: store.platforms.get().used,
     companyCounts: Object.fromEntries(Object.entries(companies()).map(([k, v]) => [k, v.length])),
     userDataDir: app.getPath('userData'),
@@ -234,6 +236,12 @@ function registerIpc() {
   // settings
   handle('settings:update', (patch) => {
     const { keys, ...rest } = patch || {};
+    if (rest.aiProvider && !['anthropic', 'local'].includes(rest.aiProvider)) throw new Error('Unknown AI provider.');
+    if (rest.localAi) {
+      const url = String(rest.localAi.baseUrl || ai.LOCAL_DEFAULT_URL).trim();
+      if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new Error('The local AI address must start with http:// or https://, e.g. http://localhost:11434/v1');
+      rest.localAi = { baseUrl: url.replace(/\/+$/, ''), model: String(rest.localAi.model || '').trim().slice(0, 120) };
+    }
     store.settings.update((s) => Object.assign(s, rest));
     return publicSettings();
   });
@@ -336,6 +344,7 @@ function registerIpc() {
     let app = store.applications.get().items.find((a) => a.jobId === jobId);
     const resume = resumeLib.pickResume(store, { resumeId: opts.resumeId, job });
     if (!resume) throw new Error('Upload a resume first (Resumes tab).');
+    if (isCurrentEmployer(job, store.profile.get().values || {})) throw new Error(`${job.company} is where you work today, so ApplyPilot won't apply there. Change this in Profile → work history if that's out of date.`);
     if (!app) app = manager.createApplication({ job, match: job.match, resume, campaign: null, status: 'queued' });
     else manager.patchApp(app.id, { resumeId: resume.id, resumeName: resume.name });
     manager.applyApplication(app.id, { mode: opts.mode || getSettings().defaultApplyMode });
@@ -565,7 +574,8 @@ function registerIpc() {
   // AI
   const aiCall = async (fn, args) => {
     const s = getSettings();
-    if (!manager.canUseAi()) throw new Error(s.keys.anthropic ? `Daily AI limit for the ${getPlan().label} plan reached. Upgrade for unlimited AI.` : 'Add your Anthropic API key in Settings → AI first.');
+    if (!manager.aiReady()) throw new Error(s.aiProvider === 'local' ? 'Choose a local AI model in Settings → AI first.' : 'Add your Anthropic API key in Settings → AI first.');
+    if (!manager.canUseAi()) throw new Error(`Daily AI limit for the ${getPlan().label} plan reached. Upgrade for unlimited AI.`);
     // args may be a thunk so the key/limit check above runs before any lookups that could fail.
     const resolved = typeof args === 'function' ? args() : args;
     try { return await fn({ ...manager.aiArgs(), ...resolved }); } catch (e) { throw new Error(ai.errMessage(e)); }
@@ -602,7 +612,8 @@ ${p.linkedin}` : ''}`;
   });
   // AI-tailored, verified resume PDF for one job (attached to its application when there is one).
   handle('resume:tailor', async (jobId, resumeId) => {
-    if (!manager.canUseAi()) throw new Error(getSettings().keys.anthropic ? `Daily AI limit for the ${getPlan().label} plan reached.` : 'Add your Anthropic API key in Settings → AI to tailor resumes.');
+    if (!manager.aiReady()) throw new Error(getSettings().aiProvider === 'local' ? 'Choose a local AI model in Settings → AI to tailor resumes.' : 'Add your Anthropic API key in Settings → AI to tailor resumes.');
+    if (!manager.canUseAi()) throw new Error(`Daily AI limit for the ${getPlan().label} plan reached.`);
     const ctx = ctxFor(jobId, resumeId);
     const resume = resumeLib.pickResume(store, { resumeId, job: ctx.job });
     let r;
@@ -621,12 +632,37 @@ ${p.linkedin}` : ''}`;
   handle('ai:parseResume', async (resumeId) => {
     const r = store.resumes.get().items.find((x) => x.id === resumeId);
     if (!r || !r.text) throw new Error('Resume has no readable text');
-    if (!getSettings().keys.anthropic) return resumeLib.guessProfile(r.text);
+    if (!manager.aiReady()) return resumeLib.guessProfile(r.text);
     return aiCall(ai.parseResume, { resumeText: r.text });
   });
   handle('ai:testKey', async () => {
     const s = getSettings();
     try { await ai.testKey({ apiKey: s.keys.anthropic, model: 'claude-haiku-4-5' }); return true; } catch (e) { throw new Error(ai.errMessage(e)); }
+  });
+  // Local model: list what the server at this address has installed (also proves it's reachable).
+  handle('ai:localModels', async (baseUrl) => {
+    try { return await ai.localModels(baseUrl); } catch (e) { throw new Error(e.message); }
+  });
+  // Plain-English job search: the AI plans, the app checks real open postings.
+  handle('discover:run', async (prompt) => {
+    if (!manager.aiReady()) throw new Error(getSettings().aiProvider === 'local' ? 'Choose a local AI model in Settings → AI first.' : 'Add your Anthropic API key in Settings → AI to use plain-English search.');
+    if (!manager.canUseAi()) throw new Error(`Daily AI limit for the ${getPlan().label} plan reached.`);
+    const { discover } = require('./discover');
+    const s = getSettings();
+    const profile = store.profile.get().values || {};
+    const scoreFor = (job) => { const r = resumeLib.pickResume(store, { job }); return scoreJob(job, { resumeText: r ? r.text : '', profile }); };
+    let r;
+    try {
+      r = await discover(prompt, {
+        aiArgs: manager.aiArgs(), keys: s.keys, companies: companies(), careerPages: store.careerPages.get().items, scoreFor,
+        log: (m) => logToFile('info', `[discover] ${m}`), onProgress: (p) => emit('search:progress', { searchId: 'discover', ...p }),
+      });
+    } catch (e) { throw new Error(ai.errMessage(e)); }
+    store.jobs.update((d) => {
+      for (const j of r.jobs) { const prev = d.items[j.id]; d.items[j.id] = { ...j, firstSeen: prev ? prev.firstSeen : new Date().toISOString(), campaignIds: prev ? prev.campaignIds || [] : [] }; }
+    });
+    store.activity.update((d) => { d.items.unshift({ id: crypto.randomUUID(), t: new Date().toISOString(), type: 'discover', message: `Plain-English search "${String(prompt).slice(0, 80)}": ${r.jobs.length} open role(s)` }); d.items.length = Math.min(d.items.length, 800); });
+    return { ...r, jobs: jobsForUi({ ids: r.jobs.map((j) => j.id) }) };
   });
 
   // license

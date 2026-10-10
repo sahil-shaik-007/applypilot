@@ -15,7 +15,7 @@ const COLORS = ['#6366f1', '#22d3ee', '#f472b6', '#f59e0b', '#10b981', '#a78bfa'
 export function CampaignEditor({ open, onClose, initial }) {
   const app = useApp();
   const profile = app.profile.values || {};
-  const blank = { name: '', roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [] };
+  const blank = { name: '', roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [], countries: [], postedWithinDays: 0, postedMonths: [] };
   const [c, setC] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setC({ ...blank, ...(initial || {}) }); }, [open]); // eslint-disable-line
@@ -48,6 +48,21 @@ export function CampaignEditor({ open, onClose, initial }) {
         <div className="grid g2">
           <Field label="Locations" help="Up to 3 are searched. Leave empty for anywhere."><TagInput value={c.locations} onChange={up('locations')} placeholder="Bengaluru, Remote…" /></Field>
           <Field label="Work mode"><Seg value={c.remote} onChange={up('remote')} options={[{ value: 'any', label: 'Any' }, { value: 'remote', label: 'Remote only' }, { value: 'onsite', label: 'On-site' }]} /></Field>
+        </div>
+        <div className="grid g2">
+          <Field label="Countries" help="Only jobs located in the countries you pick. Leave empty for any country.">
+            <MultiChips value={c.countries || []} options={app.countries || []} onChange={up('countries')} />
+          </Field>
+          <div className="col" style={{ gap: 14 }}>
+            <Field label="Posted within">
+              <select className="select" value={c.postedWithinDays || 0} onChange={(e) => up('postedWithinDays')(+e.target.value)}>
+                {POSTED.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
+              </select>
+            </Field>
+            <Field label="Only in these months" help="Jobs posted in the months you pick. Empty = any month.">
+              <MultiChips value={(c.postedMonths || []).map((n) => MONTHS[n - 1])} options={MONTHS} onChange={(v) => up('postedMonths')(v.map((m) => MONTHS.indexOf(m) + 1))} />
+            </Field>
+          </div>
         </div>
         <div className="grid g2">
           <Field label="Resume for this campaign" help="Auto picks the best resume per job using role tags and skills.">
@@ -97,10 +112,11 @@ export function CampaignEditor({ open, onClose, initial }) {
   );
 }
 
-function CampaignCard({ c, index, onEdit }) {
+function CampaignCard({ c, index, onEdit, onDetails }) {
   const app = useApp();
   const [busy, setBusy] = useState(false);
   const running = c.status === 'running';
+  const setDetails = (tab) => onDetails(c, tab);
   const resume = app.resumes.find((r) => r.id === c.resumeId);
   const apps = app.applications.filter((a) => a.campaignId === c.id);
   const today = new Date().toISOString().slice(0, 10);
@@ -148,21 +164,96 @@ function CampaignCard({ c, index, onEdit }) {
         </div>
       </div>
       <div style={{ borderTop: '1px solid var(--border)', padding: '12px 18px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, position: 'relative', zIndex: 2 }}>
-        <div className="metric"><div className="k">Found</div><div className="v">{c.stats?.found || 0}</div></div>
-        <div className="metric"><div className="k">Applied</div><div className="v" style={{ color: 'var(--green)' }}>{c.stats?.applied || 0}</div></div>
+        <div className="metric" role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="See where these jobs came from" onClick={() => setDetails('sources')}><div className="k">Found</div><div className="v">{c.stats?.found || 0}</div></div>
+        <div className="metric" role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="See the applications and their sources" onClick={() => setDetails('applied')}><div className="k">Applied</div><div className="v" style={{ color: 'var(--green)' }}>{c.stats?.applied || 0}</div></div>
         <div className="metric"><div className="k">Today</div><div className="v">{todayCount}<span className="dim tiny">/{c.dailyLimit}</span></div></div>
-        <div className="metric"><div className="k">Queued</div><div className="v">{apps.filter((a) => a.status === 'queued').length}</div></div>
+        <div className="metric" role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="See queued jobs" onClick={() => setDetails('queued')}><div className="k">Queued</div><div className="v">{apps.filter((a) => a.status === 'queued').length}</div></div>
       </div>
       <div className="row between tiny dim" style={{ padding: '0 18px 12px', position: 'relative', zIndex: 2 }}>
-        <span><FileText size={11} style={{ verticalAlign: -1 }} /> {resume ? resume.name : 'Auto resume'} · {MODES.find((m) => m.value === c.mode)?.label} · ≥{c.minScore}%</span>
+        <span><FileText size={11} style={{ verticalAlign: -1 }} /> {resume ? resume.name : 'Auto resume'} · {MODES.find((m) => m.value === c.mode)?.label} · ≥{c.minScore}%{(c.countries || []).length ? ` · ${c.countries.join(', ')}` : ''}{c.stats?.currentEmployerSkipped ? ` · ${c.stats.currentEmployerSkipped} skipped (current employer)` : ''}</span>
         <a href="#" onClick={(e) => { e.preventDefault(); app.go('queue'); }}>View matches →</a>
       </div>
     </motion.div>
   );
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const POSTED = [{ v: 0, l: 'Any time' }, { v: 1, l: 'Last 24 hours' }, { v: 3, l: 'Last 3 days' }, { v: 7, l: 'Last 7 days' }, { v: 30, l: 'Last 30 days' }];
+
+// Where a campaign's jobs came from (sources), and the applications it made.
+function CampaignDetails({ c, tab, onClose }) {
+  const app = useApp();
+  const [view, setView] = useState(tab || 'applied');
+  const nameOf = (id) => (app.connectors.find((x) => x.id === id) || {}).name || id;
+  const apps = app.applications.filter((a) => a.campaignId === c.id);
+  const applied = apps.filter((a) => a.status === 'applied');
+  const queued = apps.filter((a) => a.status === 'queued');
+  const rows = view === 'applied' ? applied : view === 'queued' ? queued : apps;
+  const sources = c.lastSourceStats || [];
+  const bySource = (list) => list.reduce((m, a) => { const k = a.job.source || 'unknown'; m[k] = (m[k] || 0) + 1; return m; }, {});
+  const appliedBy = bySource(applied);
+  const queuedBy = bySource(queued);
+  const sourceIds = [...new Set([...sources.map((s) => s.id), ...Object.keys(appliedBy), ...Object.keys(queuedBy)])];
+  const sourceRow = (id) => sources.find((s) => s.id === id) || {};
+  return (
+    <Modal open onClose={onClose} title={`${c.name} — details`} wide>
+      <div className="col" style={{ gap: 16 }}>
+        <Seg value={view} onChange={setView} options={[
+          { value: 'applied', label: `Applied (${applied.length})` },
+          { value: 'queued', label: `Queued (${queued.length})` },
+          { value: 'sources', label: 'Sources' },
+          { value: 'all', label: `All (${apps.length})` },
+        ]} />
+        {view === 'sources' ? (
+          <div className="col" style={{ gap: 10 }}>
+            <p className="small muted" style={{ margin: 0 }}>Where this campaign looked, and where its applications came from. "Found" is from the last run.</p>
+            {sourceIds.length ? (
+              <table className="table">
+                <thead><tr><th>Source</th><th>Found (last run)</th><th>Applied</th><th>Queued</th><th>Status</th></tr></thead>
+                <tbody>
+                  {sourceIds.map((id) => {
+                    const s = sourceRow(id);
+                    return (
+                      <tr key={id}>
+                        <td>{nameOf(id)}</td>
+                        <td>{s.count ?? '—'}</td>
+                        <td style={{ color: 'var(--green)' }}>{appliedBy[id] || 0}</td>
+                        <td>{queuedBy[id] || 0}</td>
+                        <td className="small">{s.error ? <span style={{ color: 'var(--red, #f87171)' }} title={s.error}>Error — {s.error.slice(0, 60)}</span> : s.id ? 'OK' : 'Applied earlier'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : <div className="small dim">No searches have run yet. Start the campaign to see its sources.</div>}
+            {c.stats?.currentEmployerSkipped ? <div className="small dim">{c.stats.currentEmployerSkipped} job(s) skipped because they are at your current employer.</div> : null}
+          </div>
+        ) : rows.length ? (
+          <div style={{ maxHeight: 420, overflow: 'auto' }}>
+            <table className="table">
+              <thead><tr><th>Company</th><th>Role</th><th>Source</th><th>Status</th><th>When</th></tr></thead>
+              <tbody>
+                {rows.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.job.company}</td>
+                    <td>{a.job.applyUrl || a.job.url ? <a href="#" onClick={(e) => { e.preventDefault(); app.run('shell:open', [a.job.applyUrl || a.job.url]); }}>{a.job.title}</a> : a.job.title}</td>
+                    <td><span className="badge">{nameOf(a.job.source || 'unknown')}</span></td>
+                    <td className="small">{a.status}</td>
+                    <td className="small dim">{new Date(a.attemptedAt || a.createdAt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <div className="small dim">Nothing here yet.</div>}
+      </div>
+    </Modal>
+  );
+}
+
 export default function Campaigns({ params }) {
   const app = useApp();
+  const [details, setDetails] = useState(null); // { c, tab }: the drill-down opens at page level
   const [editing, setEditing] = useState(null);
   useEffect(() => { if (params.draft) setEditing(params.draft); }, [params.draft]);
   const running = app.campaigns.filter((c) => c.status === 'running').length;
@@ -179,7 +270,7 @@ export default function Campaigns({ params }) {
         </div>
       </div>
       {app.campaigns.length ? (
-        <div className="grid g2"><AnimatePresence>{app.campaigns.map((c, i) => <CampaignCard key={c.id} c={c} index={i} onEdit={setEditing} />)}</AnimatePresence></div>
+        <div className="grid g2"><AnimatePresence>{app.campaigns.map((c, i) => <CampaignCard key={c.id} c={c} index={i} onEdit={setEditing} onDetails={(camp, tab) => setDetails({ c: camp, tab })} />)}</AnimatePresence></div>
       ) : (
         <Empty icon={Rocket} title="Launch your first campaign" action={<Button variant="primary" icon={Plus} onClick={() => setEditing({})}>Create campaign</Button>}>
           Tell ApplyPilot which roles you want. It searches every source on a schedule, scores each job against your resume and queues or applies to the best ones.
@@ -195,6 +286,7 @@ export default function Campaigns({ params }) {
         ))}
       </div>
       <CampaignEditor open={!!editing} initial={editing} onClose={() => setEditing(null)} />
+      {details && <CampaignDetails c={details.c} tab={details.tab} onClose={() => setDetails(null)} />}
     </div>
   );
 }

@@ -132,22 +132,67 @@ function Sources() {
 function AI() {
   const app = useApp();
   const s = app.settings;
+  const local = s.aiProvider === 'local';
   const [testing, setTesting] = useState(false);
+  const [addr, setAddr] = useState((s.localAi && s.localAi.baseUrl) || 'http://localhost:11434/v1');
+  const [models, setModels] = useState([]);
+  const [finding, setFinding] = useState(false);
   const up = async (patch) => app.set({ settings: await app.run('settings:update', [patch]) });
+  const findModels = async () => {
+    setFinding(true);
+    try {
+      const list = await app.run('ai:localModels', [addr]);
+      setModels(list);
+      if (!list.length) return app.toast('The server is running but has no models. Pull one first (e.g. "ollama pull llama3.1").', 'error');
+      app.toast(`Found ${list.length} model${list.length === 1 ? '' : 's'}`, 'success');
+      if (!s.localAi?.model || !list.includes(s.localAi.model)) await up({ localAi: { baseUrl: addr, model: list[0] } });
+      else await up({ localAi: { baseUrl: addr, model: s.localAi.model } });
+    } catch {} finally { setFinding(false); }
+  };
   return (
     <div>
-      <p className="muted" style={{ marginTop: 0 }}>ApplyPilot uses Claude by Anthropic with <b>your own API key</b> — you pay Anthropic directly (usually a few cents per application) and your data never touches our servers. Get a key at <a href="#" onClick={(e) => { e.preventDefault(); app.run('shell:open', ['https://console.anthropic.com/settings/keys']); }}>console.anthropic.com</a>.</p>
-      <div className="card pad col" style={{ gap: 12 }}>
-        <KeyField name="anthropic" label="Anthropic API key" />
-        <div className="row"><Button size="sm" icon={KeyRound} loading={testing} disabled={!s.keys.anthropic} onClick={async () => { setTesting(true); try { await app.run('ai:testKey', [], 'Key works ✓'); } catch {} finally { setTesting(false); } }}>Test key</Button></div>
+      <div className="row" style={{ marginBottom: 14 }}>
+        <Seg value={local ? 'local' : 'anthropic'} onChange={(v) => up({ aiProvider: v })} options={[{ value: 'anthropic', label: 'Claude (cloud, your key)' }, { value: 'local', label: 'Local model (on your PC)' }]} />
       </div>
-      <Row title="Model" desc="Opus gives the best writing; Sonnet is faster and cheaper; Haiku is cheapest.">
-        <select className="select" style={{ width: 280 }} value={s.aiModel} onChange={(e) => up({ aiModel: e.target.value })}>
-          {app.aiModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-        </select>
-      </Row>
+      {!local ? (
+        <>
+          <p className="muted" style={{ marginTop: 0 }}>ApplyPilot uses Claude by Anthropic with <b>your own API key</b> — you pay Anthropic directly (usually a few cents per application) and your data never touches our servers. Get a key at <a href="#" onClick={(e) => { e.preventDefault(); app.run('shell:open', ['https://console.anthropic.com/settings/keys']); }}>console.anthropic.com</a>.</p>
+          <div className="card pad col" style={{ gap: 12 }}>
+            <KeyField name="anthropic" label="Anthropic API key" />
+            <div className="row"><Button size="sm" icon={KeyRound} loading={testing} disabled={!s.keys.anthropic} onClick={async () => { setTesting(true); try { await app.run('ai:testKey', [], 'Key works ✓'); } catch {} finally { setTesting(false); } }}>Test key</Button></div>
+          </div>
+          <Row title="Model" desc="Opus gives the best writing; Sonnet is faster and cheaper; Haiku is cheapest.">
+            <select className="select" style={{ width: 280 }} value={s.aiModel} onChange={(e) => up({ aiModel: e.target.value })}>
+              {app.aiModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </Row>
+        </>
+      ) : (
+        <div className="card pad col" style={{ gap: 12 }}>
+          <p className="muted" style={{ margin: 0 }}>Run a model on this PC with <b>Ollama</b> (ollama.com) or <b>LM Studio</b> and ApplyPilot uses it for cover letters, tailored resumes, answers and plain-English search. Nothing leaves your machine. Your data only goes to the address below, so only point it at a server you run yourself.</p>
+          <div>
+            <span className="field-label">Server address</span>
+            <div className="row" style={{ gap: 8 }}>
+              <input className="input grow" value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="http://localhost:11434/v1" />
+              <Button icon={RefreshCw} loading={finding} onClick={findModels}>Find models</Button>
+            </div>
+            <div className="small dim" style={{ marginTop: 6 }}>Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1</div>
+          </div>
+          <div>
+            <span className="field-label">Model</span>
+            {models.length ? (
+              <select className="select" value={s.localAi?.model || ''} onChange={(e) => up({ localAi: { baseUrl: addr, model: e.target.value } })}>
+                {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            ) : (
+              <input className="input" value={s.localAi?.model || ''} onChange={(e) => up({ localAi: { baseUrl: addr, model: e.target.value } })} placeholder="Click Find models, or type a model name" />
+            )}
+            <div className="small dim" style={{ marginTop: 6 }}>Instruction-tuned models (for example llama3.1, qwen2.5 or mistral) give the best results. Plain-English search needs one that follows JSON instructions well.</div>
+          </div>
+        </div>
+      )}
       <Row title="Answer unknown screening questions with AI" desc="Only when your profile clearly supports the answer; otherwise the question waits for you in the Answer bank."><Switch on={s.aiAnswerQuestions} onChange={(v) => up({ aiAnswerQuestions: v })} /></Row>
-      <Row title="Usage on your plan" desc={`${app.plan.label}: ${app.plan.aiPerDay >= 1000 ? 'unlimited' : `${app.plan.aiPerDay}`} AI actions per day`}><span /></Row>
+      <Row title="Usage on your plan" desc={`${app.plan.label}: ${app.plan.aiPerDay >= 1000 ? 'unlimited' : `${app.plan.aiPerDay}`} AI actions per day${local ? ' (local models count the same way)' : ''}`}><span /></Row>
     </div>
   );
 }

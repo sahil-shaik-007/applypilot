@@ -2,6 +2,42 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] — 2026-10-11
+
+### Added
+- **Plain-English job search** (Find jobs → "Describe what you want"). For example: *"List data analyst roles at Stripe and Notion that sponsor visas in India."*
+  - The AI (your Claude key or a local model) turns the request into a plan: companies, role words, visa requirement and countries.
+  - ApplyPilot then reads the named companies' job boards (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Workday and the other ATS connectors) and your career pages. Only real postings from those boards are returned; a company with nothing open is reported as "none open".
+  - Results are normal jobs, so they can be applied for like any other job. The closed-job check still runs before anything is sent.
+  - A suggested careers URL is used only if that page really loads and lists jobs.
+- **Local AI models** (Settings → AI → Local model on your PC). Works with Ollama and LM Studio (any OpenAI-compatible server). Find models, pick one, and cover letters, resume tailoring, answers, interview prep and plain-English search use it. Your data only goes to the address you enter. See docs/LOCAL_AI.md.
+- **Country filter**: on the Find jobs page, and per campaign ("Countries"). Detected from the job's location text; postings with no clear location are left out of a country filter rather than guessed.
+- **Date and month filters**:
+  - "Posted within": last 24 hours, 3, 7 or 30 days (campaigns and Find jobs)
+  - "Only in these months" (campaigns)
+  - "Found within": last hour, 6 hours or 24 hours (Find jobs), based on when ApplyPilot first saw the job. Job boards don't report a reliable time of day, so this is the honest "time" filter.
+- **Where applications came from**:
+  - Clicking *Found*, *Applied* or *Queued* on a campaign opens its details.
+  - The *Sources* tab shows, per job board, how many jobs it returned in the last run, how many were applied for and how many are queued, and any errors.
+  - The *Applied* and *Queued* tabs list each application with its source.
+  - The review queue has a Source column.
+- **Never apply at your current employer.** Companies you work for today are skipped, from your profile's current company and open-ended work history. Manual Apply is blocked there too, with a message. Former employers are not blocked.
+- **Closed postings are removed from your queue.** Queued jobs are re-checked (up to 20 per run, each at most every 6 hours). A posting that has been taken down is moved to skipped with a note, so you never review a job that's no longer open.
+- New module `electron/jobFilters.js` (country, dates, employer), `electron/discover.js` (plain-English search) and local model support in `electron/ai.js`.
+
+### Changed
+- Settings → AI has a provider switch: *Claude (cloud, your key)* or *Local model (on your PC)*. Both count against your plan's daily AI allowance.
+
+### Known limits
+- Visa sponsorship is read from the posting's text. ApplyPilot can't verify an employer's visa policy beyond what the posting says.
+- Plain-English search quality depends on the model. Small local models can miss company names or role words; check the summary (it lists the companies it searched).
+- The e2e run uses a mock local model for the plan and the live sources for the search. Live discovery took about 20 seconds for two companies in testing.
+
+### Tests
+- Desktop e2e: 71/71 (new checks: campaign filters, Sources drill-down, local AI settings, Find jobs filters).
+- New `scripts/features.test.js`: 17/17 (country, date, month and time windows; current-employer rule; company and role matching; local model calls against a mock server).
+- Apply self-test 8/8, cloud sync 12/12, cloud server 110 passing (1 live test skipped).
+
 ## [1.3.0] — 2026-10-11
 
 ### Added

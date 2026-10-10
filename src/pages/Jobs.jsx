@@ -1,11 +1,35 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, MapPin, Loader2, Check, CircleAlert, SearchX, Rocket } from 'lucide-react';
+import { Search, MapPin, Loader2, Check, CircleAlert, SearchX, Rocket, Sparkles } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Seg, Empty, Switch, Progress } from '../components/ui';
 import { JobCard, JobDrawer, AUTO_ATS } from '../components/jobs';
 
 const SORTS = { score: 'Best match (default)', newest: 'Newest first', salary: 'Highest salary' };
+// "Describe the jobs you want": the AI plans, and only real open postings are returned.
+function PromptSearch({ onResult }) {
+  const app = useApp();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async (e) => {
+    e.preventDefault();
+    if (text.trim().length < 8) return app.toast('Describe the jobs in a sentence, e.g. "data analyst jobs at Stripe that sponsor visas".', 'error');
+    setBusy(true);
+    try { onResult(await app.run('discover:run', [text.trim()]), text.trim()); } catch {} finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={go} className="card pad" style={{ maxWidth: 780, margin: '18px auto 0', textAlign: 'left' }}>
+      <div className="row between" style={{ flexWrap: 'wrap', gap: 6 }}>
+        <span className="field-label">Or describe what you want</span>
+        <span className="small dim">The AI plans the search. Every job shown is a real, open posting.</span>
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 8 }}>
+        <input className="input grow" value={text} onChange={(e) => setText(e.target.value)} placeholder='"List data analyst roles at Stripe and Notion that sponsor visas"' />
+        <Button icon={Sparkles} loading={busy} type="submit">Find with AI</Button>
+      </div>
+    </form>
+  );
+}
 
 export default function Jobs({ params }) {
   const app = useApp();
@@ -18,7 +42,8 @@ export default function Jobs({ params }) {
   const [progress, setProgress] = useState([]);
   const [stats, setStats] = useState(null);
   const [open, setOpen] = useState(null);
-  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, visa: false, eligible: true, days: 0, hideApplied: true, source: 'all', text: '' });
+  const [f, setF] = useState({ minScore: 0, autoOnly: false, hasSalary: false, visa: false, eligible: true, days: 0, hideApplied: true, source: 'all', text: '', country: 'all', foundHours: 0 });
+  const [discovery, setDiscovery] = useState(null);
   const [sort, setSort] = useState('score');
   const searchId = useRef(null);
   const free = app.connectors.filter((c) => c.ready);
@@ -40,6 +65,16 @@ export default function Jobs({ params }) {
   };
 
   const sources = useMemo(() => [...new Set(jobs.map((j) => j.source))], [jobs]);
+  const countries = useMemo(() => [...new Set(jobs.map((j) => j.country).filter(Boolean))].sort(), [jobs]);
+
+  // Results from the plain-English search are merged into the list, so they can be applied for as usual.
+  const onDiscover = (r, text) => {
+    const ids = new Set(r.jobs.map((j) => j.id));
+    setJobs((prev) => [...r.jobs, ...prev.filter((j) => !ids.has(j.id))]);
+    setDiscovery({ ...r, text });
+    setStats(null);
+    if (!r.jobs.length) app.toast('No open roles matched that request right now.', 'error');
+  };
   const shown = useMemo(() => {
     const t = f.text.toLowerCase();
     let l = jobs.filter((j) => (j.match?.score || 0) >= f.minScore
@@ -50,6 +85,8 @@ export default function Jobs({ params }) {
       && (!f.days || (j.postedAt && Date.now() - new Date(j.postedAt) < f.days * 86400000))
       && (!f.hideApplied || !j.appStatus || j.appStatus === 'saved')
       && (f.source === 'all' || j.source === f.source)
+      && (f.country === 'all' || j.country === f.country)
+      && (!f.foundHours || (j.firstSeen && Date.now() - new Date(j.firstSeen) < f.foundHours * 3600000))
       && (!t || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(t)));
     if (sort === 'newest') l = l.slice().sort((a, b) => new Date(b.postedAt || 0) - new Date(a.postedAt || 0));
     else if (sort === 'salary') l = l.slice().sort((a, b) => (b.salaryMax || b.salaryMin || 0) - (a.salaryMax || a.salaryMin || 0));
@@ -74,7 +111,25 @@ export default function Jobs({ params }) {
         <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
           <Seg value={remote} onChange={setRemote} options={[{ value: 'any', label: 'Any' }, { value: 'remote', label: 'Remote only' }, { value: 'onsite', label: 'On-site / hybrid' }]} />
         </div>
+        <PromptSearch onResult={onDiscover} />
       </div>
+
+      <AnimatePresence>
+        {discovery && (
+          <motion.div key="disc" className="card pad" style={{ marginBottom: 20 }} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ fontWeight: 700 }}>{discovery.jobs.length} open role{discovery.jobs.length === 1 ? '' : 's'} for "{discovery.text}"</span>
+              <Button size="sm" variant="ghost" onClick={() => setDiscovery(null)}>Dismiss</Button>
+            </div>
+            <div className="chips" style={{ marginTop: 10 }}>
+              {Object.entries(discovery.perCompany).map(([name, n]) => <span key={name} className="badge green">{name} · {n}</span>)}
+              {discovery.missing.map((name) => <span key={name} className="badge" title="No open role matched at this company right now">{name} · none open</span>)}
+            </div>
+            {discovery.pageNotes.filter((p) => p.error).map((p) => <div key={p.url} className="small dim" style={{ marginTop: 6 }}>Couldn't read {p.company}'s careers page ({p.url}): {p.error}</div>)}
+            {discovery.plan.note && <div className="small dim" style={{ marginTop: 6 }}>{discovery.plan.note}</div>}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {(loading || stats) && (
@@ -108,6 +163,19 @@ export default function Jobs({ params }) {
               <span className="field-label">Posted within</span>
               <select className="select" value={f.days} onChange={(e) => setF({ ...f, days: +e.target.value })}>
                 <option value={0}>Any time</option><option value={1}>24 hours</option><option value={3}>3 days</option><option value={7}>7 days</option><option value={30}>30 days</option>
+              </select>
+            </div>
+            <div>
+              <span className="field-label">Found within</span>
+              <select className="select" value={f.foundHours} onChange={(e) => setF({ ...f, foundHours: +e.target.value })}>
+                <option value={0}>Any time</option><option value={1}>Last hour</option><option value={6}>Last 6 hours</option><option value={24}>Last 24 hours</option>
+              </select>
+            </div>
+            <div>
+              <span className="field-label">Country</span>
+              <select className="select" value={f.country} onChange={(e) => setF({ ...f, country: e.target.value })}>
+                <option value="all">All countries</option>
+                {countries.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>

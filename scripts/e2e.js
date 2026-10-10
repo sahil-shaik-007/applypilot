@@ -363,7 +363,7 @@ async function campaigns() {
       await page.getByRole('button', { name: /New campaign/ }).first().click(); await page.waitForTimeout(500);
       const tag = page.locator('.modal .tag-input input').first();
       await tag.fill(role); await tag.press('Enter');
-      if (resume) await page.locator('.modal select').first().selectOption(resume.id);
+      if (resume) await page.locator('.modal select', { has: page.locator('option[value="auto"]') }).first().selectOption(resume.id);
       await page.locator('.modal-foot button', { hasText: /^Save$/ }).click(); await page.waitForTimeout(700);
     }
     const list = await call('campaigns:list');
@@ -371,6 +371,41 @@ async function campaigns() {
     assert(list.length === 3, `expected 3 campaigns, got ${list.length}`);
     assert(list.find((c) => c.roles[0] === 'Data Analyst').resumeId === analyst.id, 'resume not pinned');
     await call('campaigns:save', { ...list.find((c) => c.name === 'Backend Engineer'), resumeId: backend.id });
+  });
+  await check('campaign editor has country, posted-within and month filters that save', async () => {
+    await nav('Campaigns');
+    await page.getByRole('button', { name: /New campaign/ }).first().click(); await page.waitForTimeout(500);
+    const modal = page.locator('.modal');
+    assert(await modal.getByText('Countries', { exact: true }).isVisible(), 'Countries filter missing');
+    assert(await modal.getByText('Posted within', { exact: true }).isVisible(), 'Posted within missing');
+    assert(await modal.getByText('Only in these months', { exact: true }).isVisible(), 'month filter missing');
+    const tag = modal.locator('.tag-input input').first();
+    await tag.fill('Filter Test Role'); await tag.press('Enter');
+    await modal.locator('.chip, .badge', { hasText: /^India$/ }).first().click(); await page.waitForTimeout(200);
+    await modal.locator('select', { has: page.locator('option[value="7"]') }).first().selectOption('7');
+    await modal.locator('.chip, .badge', { hasText: /^Jan$/ }).first().click(); await page.waitForTimeout(200);
+    await page.locator('.modal-foot button', { hasText: /^Save$/ }).click(); await page.waitForTimeout(700);
+    const c = (await call('campaigns:list')).find((x) => x.roles && x.roles[0] === 'Filter Test Role');
+    assert(c, 'campaign not saved');
+    assert(JSON.stringify(c.countries) === '["India"]', `countries not saved: ${JSON.stringify(c.countries)}`);
+    assert(c.postedWithinDays === 7, `posted within not saved: ${c.postedWithinDays}`);
+    assert(JSON.stringify(c.postedMonths) === '[1]', `months not saved: ${JSON.stringify(c.postedMonths)}`);
+    await call('campaigns:delete', c.id); // keep this check's campaign out of the later parallel-run checks
+  });
+  await check('clicking Applied on a campaign opens its applications and sources', async () => {
+    const card = page.locator('.card', { hasText: 'Data Analyst' }).first();
+    await card.locator('[title="See the applications and their sources"]').click(); await page.waitForTimeout(600);
+    const modal = page.locator('.modal', { hasText: 'details' });
+    assert(await modal.isVisible(), 'details dialog did not open');
+    try {
+      await modal.getByRole('button', { name: /^Sources$/ }).click(); await page.waitForTimeout(300);
+      const table = await modal.locator('th', { hasText: 'Found (last run)' }).count();
+      const empty = await modal.getByText(/No searches have run yet|Where this campaign looked/).count();
+      assert(table > 0 || empty > 0, 'sources panel missing');
+      await shot('17-campaign-sources');
+    } finally {
+      await page.keyboard.press('Escape'); await page.waitForTimeout(400);
+    }
   });
   await check('edit campaign: change min score and remove a location tag', async () => {
     const card = page.locator('.card', { hasText: 'Backend Engineer' }).first();
@@ -705,11 +740,33 @@ async function settingsAndPlans() {
       assert((await call('careerPages:list')).length === 0, 'not removed');
     });
   }
+  await check('AI settings: switch to a local model, save the address, switch back to Claude', async () => {
+    await page.locator('.side-list button', { hasText: /^AI$/ }).click(); await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Local model (on your PC)' }).click(); await page.waitForTimeout(500);
+    let st = (await call('app:bootstrap')).settings;
+    assert(st.aiProvider === 'local', `provider not saved: ${st.aiProvider}`);
+    assert(await page.getByText('Server address').isVisible(), 'local address field missing');
+    await page.locator('input[placeholder="http://localhost:11434/v1"]').fill('ftp://nope');
+    await page.getByRole('button', { name: 'Find models' }).click(); await page.waitForTimeout(600);
+    st = (await call('app:bootstrap')).settings;
+    assert(st.localAi && st.localAi.baseUrl !== 'ftp://nope', 'an invalid address was saved');
+    await page.getByRole('button', { name: 'Claude (cloud, your key)' }).click(); await page.waitForTimeout(500);
+    st = (await call('app:bootstrap')).settings;
+    assert(st.aiProvider === 'anthropic', 'provider not switched back');
+  });
+  await check('Find jobs page: plain-English search box, country and found-within filters', async () => {
+    await nav('Find jobs');
+    assert(await page.getByRole('button', { name: /Find with AI/ }).isVisible(), 'plain-English search button missing');
+    assert(await page.locator('.card select', { has: page.locator('option[value="24"]') }).count() > 0, 'found-within filter missing');
+    assert(await page.getByText('Country', { exact: true }).first().isVisible(), 'country filter missing');
+    await shot('18-find-jobs-prompt');
+  });
   await check('AI actions without a key show a helpful message', async () => {
     try { await call('ai:coverLetter', 'nope'); throw new Error('no error'); } catch (e) { assert(/Anthropic API key/.test(e.message), e.message); }
   });
   await check('offline license activates Lifetime, removal falls back', async () => {
     const key = execSync(`node "${path.join(ROOT, 'scripts', 'license-tool.js')}" issue e2e@example.com lifetime`).toString().trim();
+    await nav('Settings');
     await page.locator('.side-list button', { hasText: 'Plan & license' }).click(); await page.waitForTimeout(500);
     await page.locator('input[placeholder^="Paste the key"]').fill(key);
     await page.getByRole('button', { name: 'Activate' }).click(); await page.waitForTimeout(1000);

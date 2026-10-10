@@ -4,11 +4,12 @@ ApplyPilot ships with six layers of automated tests. Run them before every relea
 
 | Layer | Command | What it covers | Network |
 |---|---|---|---|
-| **End-to-end UI** | `node scripts/e2e.js` | 67 checks through the real Electron UI (includes Career pages: inspect, add, toggle, refresh, remove). See the list below. | Live job sources |
-| E2E on the installer build | `node scripts/e2e.js --exe release/win-unpacked/ApplyPilot.exe` | Same 67 checks against the packaged app (asar, unpacked modules, bundled icon) | Live |
+| **End-to-end UI** | `node scripts/e2e.js` | 71 checks through the real Electron UI (includes Career pages: inspect, add, toggle, refresh, remove). See the list below. | Live job sources |
+| E2E on the installer build | `node scripts/e2e.js --exe release/win-unpacked/ApplyPilot.exe` | Same 71 checks against the packaged app (asar, unpacked modules, bundled icon) | Live |
 | **Phone ↔ desktop sync** | `node scripts/cloud-sync.e2e.js [--exe …]` | Starts the real cloud server, plays the phone with the shared crypto, drives the desktop app: link, encrypted push/pull, outbox → Review queue, phone edits flowing back, tamper rejection, device revocation, and **"server DB contains no readable personal data"** (10 checks) | Local server |
 | **Cloud server** | `cd web && npm test` | 110 passing tests (1 live test skipped without `LIVE=1`): auth (Google ID token, dev-login gating), sessions, CSRF/Origin, vault, items/versions/tombstones, blobs/quotas, device link/revoke, export, delete account, rate limits, headers, and an E2E crypto test proving only ciphertext is stored | None (`LIVE=1` adds a live search) |
 | Mobile PWA | `node web/client/e2e/mobile.e2e.mjs` | Phone-sized (390×844) walkthrough: sign-in, vault create/lock/unlock, profile, resume upload, search, swipe triage, quick-fill, send to laptop, devices, delete account; no horizontal overflow at 360 px | Local server |
+| **Feature units** | `node scripts/features.test.js` | 17 checks: country, date/month/time windows, current-employer rule, plain-English company and role matching, local AI model calls (mock server) | None |
 | Apply engine self-test | `node scripts/apply-selftest.js` | 8 checks against a **local** page: submit path, dry-run guard, review hand-off, abort, missing-answer safety, cancel-window Hold, cancel window elapsing, and the watchdog (a slow fill is never submitted) | None |
 | Apply dry-run on real postings | `node scripts/apply-dryrun.js [greenhouse\|lever\|ashby] [--url=…]` | Fills real application forms and **never submits** | Live |
 | Connectors | `node scripts/test-connectors.js` · `node scripts/test-ats.js` | Every job source returns well-formed jobs | Live |
@@ -114,7 +115,7 @@ Useful flags for `e2e.js`:
 
 | Suite | Result |
 |---|---|
-| Desktop E2E (dev build) | **67/67** |
+| Desktop E2E (dev build) | **71/71** |
 | Phone ↔ desktop sync E2E | **10/10** |
 | Apply engine self-test | **8/8** |
 | Cloud server | **64 pass, 0 fail** (1 live test skipped unless `LIVE=1`; passes with it) |

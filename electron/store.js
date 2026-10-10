@@ -45,6 +45,8 @@ const DEFAULT_SETTINGS = {
   enabledSources: null, // null = all free sources
   keys: {},
   aiModel: 'claude-opus-5-5',
+  aiProvider: 'anthropic', // 'anthropic' (your API key) | 'local' (Ollama, LM Studio, … on this PC or LAN)
+  localAi: { baseUrl: 'http://localhost:11434/v1', model: '' },
   aiAutoCoverLetter: true,
   aiAnswerQuestions: true,
   notifications: true,

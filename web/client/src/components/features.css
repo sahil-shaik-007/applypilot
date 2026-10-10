@@ -1,0 +1,55 @@
+/* Styles for the parity screens (campaigns, review queue, referrals, tailored PDF, dashboard).
+   Same dark trustmrr language as styles.css; mobile-first, no horizontal overflow at 360px. */
+
+/* 44px touch targets on touch screens (small buttons and chips included). */
+@media (pointer: coarse) {
+  .btn-sm { min-height: 44px; }
+  .btn-sm.btn-icon { width: 44px; }
+  .chip { min-height: 44px; }
+}
+
+.tap { min-height: 44px; }
+.check {
+  width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; border-radius: var(--radius-sm);
+  background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 0;
+}
+.check .box { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--border-strong); display: grid; place-items: center; transition: all .15s var(--ease); }
+.check.on .box { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.campaign-bar { height: 3px; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.metric-row .metric .v { font-size: 18px; }
+
+.queue-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 2px; min-width: 0; }
+.queue-row .grow { min-width: 0; }
+.sticky-bar {
+  position: sticky; bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px); z-index: 20;
+  display: flex; gap: 8px; align-items: center; padding: 8px; border-radius: 14px;
+  background: rgba(20,20,20,.94); border: 1px solid var(--border-strong); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+@media (min-width: 1024px) { .sticky-bar { bottom: 12px; } }
+.sticky-bar > * { min-width: 0; }
+
+.funnel-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 46px; gap: 10px; align-items: center; }
+.funnel-track { height: 20px; background: rgba(255,255,255,.04); border-radius: 6px; overflow: hidden; }
+.funnel-track > div { height: 100%; border-radius: 6px; }
+
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 30px; margin-top: 8px; }
+.spark > div { flex: 1; border-radius: 3px; }
+
+.rate-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; min-width: 0; }
+.rate-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.countdown { font-size: 40px; font-weight: 700; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.event-log { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+.pdf-page { width: 100%; height: auto; display: block; border-radius: 6px; background: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+
+.person-row { display: flex; align-items: center; gap: 10px; min-height: 52px; min-width: 0; }
+.person-row .grow { min-width: 0; }
+
+.digest { position: relative; overflow: hidden; }
+.digest ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; }
+
+.mode-card { text-align: left; color: inherit; width: 100%; cursor: pointer; padding: 12px 14px; }
+.mode-card.on { border-color: rgba(129,140,248,.6); background: rgba(99,102,241,.08); }

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useDragControls } from 'framer-motion';
 import { X, Loader2, CircleAlert, Check, Info, Copy } from 'lucide-react';
+import './features.css';
 
 export const fade = { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] } };
 export const stagger = (i) => ({ initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.28, delay: Math.min(i, 12) * 0.035, ease: [0.4, 0, 0.2, 1] } });

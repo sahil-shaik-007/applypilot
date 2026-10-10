@@ -49,7 +49,7 @@ function Shell() {
     <div className="shell has-rail">
       <div className="rail-brand"><Brand /></div>
       <header className="topbar">
-        {def.parent ? <Button variant="ghost" icon={ChevronLeft} aria-label="Back" onClick={() => go(def.parent)} /> : <span className="star" style={{ color: 'var(--accent)', display: 'grid' }}><Star size={18} fill="currentColor" /></span>}
+        {def.parent ? <Button variant="ghost" icon={ChevronLeft} aria-label="Back" onClick={() => go(def.parent)} /> : <span style={{ display: 'grid', width: 44, placeItems: 'center' }}><Mark size={24} /></span>}
         <h1 className="grow">{def.title}</h1>
         <Button variant="ghost" icon={RefreshCw} aria-label="Sync now" className={app.syncState === 'syncing' ? 'syncing' : ''} onClick={() => app.refresh()} />
         <Button variant="ghost" icon={Lock} aria-label="Lock vault" data-testid="lock" onClick={() => app.lock('Vault locked.')} />

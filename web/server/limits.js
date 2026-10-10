@@ -26,5 +26,8 @@ export function createLimiters(config) {
     redeemGlobal: make(r.redeemGlobal, everyone, 'Device linking is temporarily paused, try again later'),
     search: make(r.search, byUser, 'Too many searches, wait a minute'),
     writes: make(r.writes, byUser),
+    watchlist: make(r.watchlist, byUser, 'Too many watchlist changes, try again later'),
+    history: make(r.history, byUser, 'Too many lookups, wait a minute'),
+    push: make(r.push, byUser, 'Too many notification changes, try again later'),
   };
 }

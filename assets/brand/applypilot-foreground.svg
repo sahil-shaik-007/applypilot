@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Android adaptive-icon foreground / maskable: light mark inside the 66% safe zone, transparent. -->
+  <defs>
+    <linearGradient id="wingLight" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e0e7ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient>
+    <linearGradient id="wingDark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c7d2fe"/><stop offset="1" stop-color="#94a3fb"/></linearGradient>
+  </defs>
+  <g transform="translate(512 512) scale(.62) translate(-533 -503)">
+    <path d="M254 550 L 416 700" stroke="#e0e7ff" stroke-width="96" stroke-linecap="round"/>
+    <polygon points="812,226 330,640 474,664" fill="url(#wingLight)"/>
+    <polygon points="812,226 474,664 486,780" fill="url(#wingDark)"/>
+  </g>
+</svg>

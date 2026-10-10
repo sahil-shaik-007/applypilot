@@ -1,7 +1,8 @@
-// Desktop device linking (one-time 8-character codes → device bearer tokens), listing and revocation.
+// Desktop device linking (one-time 8-character codes → device bearer tokens), listing and revocation of
+// desktop devices, native app sessions and web sessions.
 import { Router } from 'express';
 import { HttpError, assertName, isPlainObject, cleanText, newLinkCode, normalizeLinkCode, randomId, randomToken, sha256 } from '../util.js';
-import { requireAuth } from '../security.js';
+import { requireAuth, clearSessionCookies } from '../security.js';
 import { userView } from './auth.js';
 
 export function deviceRoutes(ctx) {
@@ -48,15 +49,55 @@ export function deviceRoutes(ctx) {
     res.json(result);
   });
 
+  // Desktop devices, plus the signed-in phone apps (native sessions) under `apps`.
   r.get('/devices', session, (req, res) => {
-    const devices = repo.q.listDevices.all(req.auth.user.id).map((d) => ({ id: d.id, name: d.name, createdAt: d.created_at, lastSeenAt: d.last_seen_at }));
-    res.json({ devices });
+    const uid = req.auth.user.id;
+    const devices = repo.q.listDevices.all(uid).map((d) => ({ id: d.id, name: d.name, createdAt: d.created_at, lastSeenAt: d.last_seen_at }));
+    const apps = repo.q.listNativeSessions.all(uid, Date.now()).map((s) => ({
+      id: s.id, name: s.name || 'Mobile app', platform: s.platform || null, createdAt: s.created_at, lastSeenAt: s.last_seen_at,
+      current: req.auth.session?.id === s.id,
+    }));
+    res.json({ devices, apps });
   });
 
+  // Revokes a desktop device or a phone app (native session) by id. Push targets registered by it go too.
   r.delete('/devices/:id', session, limiters.writes, (req, res) => {
     const id = assertName(req.params.id, 'device id');
-    const { changes } = repo.q.deleteDevice.run(id, req.auth.user.id);
+    const uid = req.auth.user.id;
+    const changes = repo.tx(() => {
+      const n = Number(repo.q.deleteDevice.run(id, uid).changes) + Number(repo.q.deleteNativeSessionById.run(id, uid).changes);
+      if (n) repo.q.deletePushOwner.run(uid, id);
+      return n;
+    });
     if (!changes) throw new HttpError(404, 'Not found');
+    res.json({ ok: true });
+  });
+
+  // Every live sign-in (web browsers and phone apps).
+  r.get('/sessions', session, (req, res) => {
+    const sessions = repo.q.listSessions.all(req.auth.user.id, Date.now()).map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      name: s.kind === 'native' ? (s.name || 'Mobile app') : 'Web browser',
+      platform: s.platform || (s.kind === 'web' ? 'web' : null),
+      createdAt: s.created_at,
+      lastSeenAt: s.last_seen_at,
+      expiresAt: s.expires_at,
+      current: req.auth.session?.id === s.id,
+    }));
+    res.json({ sessions });
+  });
+
+  r.delete('/sessions/:id', session, limiters.writes, (req, res) => {
+    const id = assertName(req.params.id, 'session id');
+    const uid = req.auth.user.id;
+    const changes = repo.tx(() => {
+      const n = Number(repo.q.deleteSessionById.run(id, uid).changes);
+      if (n) repo.q.deletePushOwner.run(uid, id);
+      return n;
+    });
+    if (!changes) throw new HttpError(404, 'Not found');
+    if (req.auth.session?.id === id && req.auth.transport === 'cookie') clearSessionCookies(res);
     res.json({ ok: true });
   });
 

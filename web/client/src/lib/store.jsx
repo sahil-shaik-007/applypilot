@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { unlockVault } from '@shared/vaultCrypto.js';
 import { api, setUnauthorizedHandler } from './api.js';
 import { Sync } from './sync.js';
+import { setTestMode } from './bridge.js';
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -97,7 +98,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     setUnauthorizedHandler(() => { if (userRef.current) { toast('Your session ended. Sign in again.', 'error'); toLanding(); } });
     (async () => {
-      try { setConfig(await api('/config')); } catch { setConfig({ googleClientId: null, devLogin: false, offline: true }); }
+      try { const c = await api('/config'); setTestMode(!!c.devLogin); setConfig(c); } catch { setConfig({ googleClientId: null, devLogin: false, offline: true }); }
       try { await refreshMe(); } catch { setPhase('landing'); }
     })();
   }, []); // eslint-disable-line
@@ -150,7 +151,7 @@ export function AppProvider({ children }) {
   // ---------------- derived decrypted data
   const data = useMemo(() => {
     const s = syncRef.current;
-    if (!s) return { profile: {}, settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [] };
+    if (!s) return { profile: {}, settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [], campaigns: [], networkMeta: null };
     const byDate = (k) => (a, b) => String(b[k] || '').localeCompare(String(a[k] || ''));
     return {
       profile: (s.get('profile', 'main') || {}).values || {},
@@ -160,6 +161,8 @@ export function AppProvider({ children }) {
       qa: s.list('qa').sort(byDate('updatedAt')),
       outbox: s.entries('outbox').map((r) => ({ ...r.data, id: r.id, pending: !!r.pending })).sort(byDate('createdAt')),
       savedJobs: s.entries('savedJobs').map((r) => ({ ...r.data, recordId: r.id })),
+      campaigns: s.list('campaigns').sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))),
+      networkMeta: s.get('network', 'meta') || null,
     };
   }, [rev]);
 

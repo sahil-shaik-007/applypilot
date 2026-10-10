@@ -1,0 +1,25 @@
+{
+  "appId": "com.applypilot.app",
+  "appName": "ApplyPilot",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor"
+  },
+  "backgroundColor": "#0a0a0a",
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "SplashScreen": { "launchShowDuration": 600, "backgroundColor": "#0a0a0a", "showSpinner": false },
+    "StatusBar": { "style": "DARK", "backgroundColor": "#0a0a0a", "overlaysWebView": false },
+    "LocalNotifications": { "iconColor": "#818cf8" },
+    "Keyboard": { "resize": "body" },
+    "BackgroundRunner": {
+      "label": "com.applypilot.app.check",
+      "src": "runners/background.js",
+      "event": "checkJobs",
+      "repeat": true,
+      "interval": 60,
+      "autoStart": true
+    }
+  }
+}

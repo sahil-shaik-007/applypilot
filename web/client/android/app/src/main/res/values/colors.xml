@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ApplyPilot dark palette (matches the web client / desktop app). -->
+    <color name="colorPrimary">#0a0a0a</color>
+    <color name="colorPrimaryDark">#0a0a0a</color>
+    <color name="colorAccent">#818cf8</color>
+    <color name="appBackground">#0a0a0a</color>
+    <color name="splashBackground">#0a0a0a</color>
+</resources>

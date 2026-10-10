@@ -1,0 +1,66 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  body { margin: 0; background: #0a0a0a; font-family: Inconsolata, monospace; color: #ddd; }
+  .row { display: flex; gap: 40px; padding: 30px 40px; align-items: flex-end; }
+  .c { text-align: center; }
+  .sizes { display: flex; gap: 14px; align-items: flex-end; justify-content: center; margin-top: 14px; }
+  .light { background: #f4f4f5; border-radius: 12px; padding: 10px; }
+</style></head><body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="tile" cx="28%" cy="18%" r="100%">
+      <stop offset="0" stop-color="#1c1f38"/><stop offset=".55" stop-color="#0f1019"/><stop offset="1" stop-color="#07070b"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".2"/><stop offset="1" stop-color="#fff" stop-opacity=".03"/>
+    </linearGradient>
+    <linearGradient id="lite" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/><stop offset=".6" stop-color="#8b9cff"/><stop offset="1" stop-color="#7ce8ff"/>
+    </linearGradient>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#262070"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b5ff0"/><stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="30"/></filter>
+
+    <!-- D: check whose long arm is a folded paper plane (on dark tile) -->
+    <symbol id="mark" viewBox="0 0 1024 1024">
+      <g filter="url(#glow)" opacity=".55">
+        <path d="M250 548 L 418 702" stroke="#6366f1" stroke-width="96" stroke-linecap="round"/>
+        <polygon points="812,226 330,640 474,664" fill="#7c8cff"/>
+      </g>
+      <path d="M250 548 L 418 702" stroke="url(#stroke)" stroke-width="96" stroke-linecap="round"/>
+      <polygon points="812,226 330,640 474,664" fill="url(#lite)"/>
+      <polygon points="812,226 474,664 486,780" fill="url(#dark)"/>
+    </symbol>
+    <symbol id="D" viewBox="0 0 1024 1024">
+      <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile)"/>
+      <rect x="49.5" y="49.5" width="925" height="925" rx="231" fill="none" stroke="url(#edge)" stroke-width="3"/>
+      <use href="#mark"/>
+    </symbol>
+    <!-- E: same mark on an indigo gradient tile (store/marketing variant) -->
+    <linearGradient id="tile2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/><stop offset=".6" stop-color="#3730a3"/><stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="w1" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e0e7ff"/><stop offset="1" stop-color="#ffffff"/></linearGradient>
+    <linearGradient id="w2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c7d2fe"/><stop offset="1" stop-color="#a5b4fc"/></linearGradient>
+    <symbol id="E" viewBox="0 0 1024 1024">
+      <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile2)"/>
+      <rect x="49.5" y="49.5" width="925" height="925" rx="231" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="3"/>
+      <path d="M250 548 L 418 702" stroke="#e0e7ff" stroke-width="96" stroke-linecap="round"/>
+      <polygon points="812,226 330,640 474,664" fill="url(#w1)"/>
+      <polygon points="812,226 474,664 486,780" fill="url(#w2)"/>
+    </symbol>
+  </defs>
+</svg>
+<div class="row">
+  <div class="c"><svg width="300" height="300"><use href="#D"/></svg><div>D · check-plane (dark)</div>
+    <div class="sizes"><svg width="64" height="64"><use href="#D"/></svg><svg width="32" height="32"><use href="#D"/></svg><svg width="16" height="16"><use href="#D"/></svg><span class="light"><svg width="32" height="32"><use href="#D"/></svg></span></div></div>
+  <div class="c"><svg width="300" height="300"><use href="#E"/></svg><div>E · check-plane (indigo)</div>
+    <div class="sizes"><svg width="64" height="64"><use href="#E"/></svg><svg width="32" height="32"><use href="#E"/></svg><svg width="16" height="16"><use href="#E"/></svg><span class="light"><svg width="32" height="32"><use href="#E"/></svg></span></div></div>
+  <div class="c"><svg width="300" height="300" viewBox="0 0 1024 1024"><use href="#mark"/></svg><div>mark only (in-app)</div>
+    <div class="sizes"><svg width="40" height="40" viewBox="0 0 1024 1024"><use href="#mark"/></svg><svg width="20" height="20" viewBox="0 0 1024 1024"><use href="#mark"/></svg></div></div>
+</div>
+</body></html>

@@ -8,7 +8,7 @@ export const ACCEPT = '.pdf,.docx,.txt,.md,application/pdf,application/vnd.openx
 export const MAX_BYTES = 5 * 1024 * 1024; // encrypted blob must stay under the server's 6 MB limit
 
 let pdfjsPromise = null;
-async function loadPdfjs() {
+export async function loadPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = Promise.all([
       import('pdfjs-dist/legacy/build/pdf.mjs'),

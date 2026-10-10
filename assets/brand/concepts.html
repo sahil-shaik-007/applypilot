@@ -1,0 +1,67 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  body { margin: 0; background: #0a0a0a; font-family: Inconsolata, monospace; color: #ddd; }
+  .row { display: flex; gap: 48px; padding: 40px; align-items: flex-end; }
+  .c { text-align: center; }
+  .sizes { display: flex; gap: 14px; align-items: flex-end; justify-content: center; margin-top: 18px; }
+  .light { background: #f4f4f5; border-radius: 12px; padding: 10px; }
+</style></head><body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="tile" cx="30%" cy="20%" r="95%">
+      <stop offset="0" stop-color="#1b1d33"/><stop offset=".55" stop-color="#0f1018"/><stop offset="1" stop-color="#08080c"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".18"/><stop offset="1" stop-color="#ffffff" stop-opacity=".03"/>
+    </linearGradient>
+    <linearGradient id="g1" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/><stop offset=".55" stop-color="#818cf8"/><stop offset="1" stop-color="#67e8f9"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4338ca"/><stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#818cf8" stop-opacity="0"/><stop offset="1" stop-color="#a5b4fc" stop-opacity=".9"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="28"/></filter>
+
+    <!-- Concept A: paper plane on a launch arc -->
+    <symbol id="A" viewBox="0 0 1024 1024">
+      <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile)"/>
+      <rect x="49" y="49" width="926" height="926" rx="231" fill="none" stroke="url(#edge)" stroke-width="3"/>
+      <path d="M232 744 C 360 744, 470 690, 560 600" fill="none" stroke="url(#trail)" stroke-width="22" stroke-linecap="round" stroke-dasharray="2 46"/>
+      <polygon points="790,236 300,470 488,540" fill="url(#g1)" filter="url(#glow)" opacity=".55"/>
+      <polygon points="790,236 300,470 488,540" fill="url(#g1)"/>
+      <polygon points="790,236 488,540 556,770" fill="url(#g2)"/>
+      <polygon points="488,540 520,640 556,770" fill="#312e81" opacity=".7"/>
+    </symbol>
+
+    <!-- Concept B: check mark that becomes an ascending flight path -->
+    <symbol id="B" viewBox="0 0 1024 1024">
+      <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile)"/>
+      <rect x="49" y="49" width="926" height="926" rx="231" fill="none" stroke="url(#edge)" stroke-width="3"/>
+      <path d="M262 560 L 430 720 L 760 300" fill="none" stroke="url(#g1)" stroke-width="92" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" opacity=".5"/>
+      <path d="M262 560 L 430 720 L 760 300" fill="none" stroke="url(#g1)" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="790" cy="262" r="34" fill="#e0e7ff"/>
+    </symbol>
+
+    <!-- Concept C: "pilot star" — a four-point spark with a cut flight line through it -->
+    <symbol id="C" viewBox="0 0 1024 1024">
+      <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#tile)"/>
+      <rect x="49" y="49" width="926" height="926" rx="231" fill="none" stroke="url(#edge)" stroke-width="3"/>
+      <path d="M512 196 C 540 420, 604 484, 828 512 C 604 540, 540 604, 512 828 C 484 604, 420 540, 196 512 C 420 484, 484 420, 512 196 Z" fill="url(#g1)" filter="url(#glow)" opacity=".5"/>
+      <path d="M512 196 C 540 420, 604 484, 828 512 C 604 540, 540 604, 512 828 C 484 604, 420 540, 196 512 C 420 484, 484 420, 512 196 Z" fill="url(#g1)"/>
+      <path d="M300 724 L 724 300" stroke="#0f1018" stroke-width="40" stroke-linecap="round"/>
+      <path d="M300 724 L 724 300" stroke="#e0e7ff" stroke-width="14" stroke-linecap="round" stroke-dasharray="1 0"/>
+    </symbol>
+  </defs>
+</svg>
+<div class="row">
+  <div class="c"><svg width="300" height="300"><use href="#A"/></svg><div>A · plane on launch arc</div>
+    <div class="sizes"><svg width="64" height="64"><use href="#A"/></svg><svg width="32" height="32"><use href="#A"/></svg><svg width="16" height="16"><use href="#A"/></svg><span class="light"><svg width="32" height="32"><use href="#A"/></svg></span></div></div>
+  <div class="c"><svg width="300" height="300"><use href="#B"/></svg><div>B · check → flight path</div>
+    <div class="sizes"><svg width="64" height="64"><use href="#B"/></svg><svg width="32" height="32"><use href="#B"/></svg><svg width="16" height="16"><use href="#B"/></svg><span class="light"><svg width="32" height="32"><use href="#B"/></svg></span></div></div>
+  <div class="c"><svg width="300" height="300"><use href="#C"/></svg><div>C · pilot star + flight line</div>
+    <div class="sizes"><svg width="64" height="64"><use href="#C"/></svg><svg width="32" height="32"><use href="#C"/></svg><svg width="16" height="16"><use href="#C"/></svg><span class="light"><svg width="32" height="32"><use href="#C"/></svg></span></div></div>
+</div>
+</body></html>

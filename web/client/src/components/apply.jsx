@@ -6,8 +6,9 @@ import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, timeAgo } from './ui.jsx';
 import { useApplySessions, resolveSubmit, dismissSession, cancelSession, applyInApp, applyJobInApp } from '../lib/applyFlow.js';
 import { previewPages, generateTailored, deleteTailored } from '../lib/tailored.js';
-import { saveBytes } from '../lib/bridge.js';
-import { tick } from '../lib/campaigns.js';
+import { saveBytes, nat } from '../lib/bridge.js';
+import { tick, resetRuntime, campaignWatchlist } from '../lib/campaigns.js';
+import { forgetJobs } from '../lib/insights.js';
 import { aiError } from '../lib/ai.js';
 import { getApplication } from '../lib/apply.js';
 
@@ -22,8 +23,13 @@ export function CampaignScheduler() {
     const t = setInterval(run, 60000);
     const onVis = () => { if (!document.hidden) setTimeout(run, 800); };
     document.addEventListener('visibilitychange', onVis);
-    return () => { clearTimeout(first); clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+    return () => { clearTimeout(first); clearInterval(t); document.removeEventListener('visibilitychange', onVis); resetRuntime(); forgetJobs(); };
   }, []);
+  // Tapping a "new matches" / "about to submit" notification opens the Review queue.
+  useEffect(() => nat().notifications.onTap((d) => { if (d && (d.route === 'queue' || d.type === 'campaign-matches')) go('queue', d.campaignId ? { campaign: d.campaignId } : undefined); }), []);
+  // Keep the background check's search list in step with running campaigns.
+  const sig = app.campaigns.filter((c) => c.status === 'running').map((c) => `${c.id}:${(c.roles || []).join('|')}:${(c.locations || []).join('|')}:${c.remote}:${c.runOn}`).join(',');
+  useEffect(() => { const list = campaignWatchlist(app.campaigns); if (nat().isNative) nat().background.register(list).catch(() => {}); }, [sig]); // eslint-disable-line
   return null;
 }
 

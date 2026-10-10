@@ -816,6 +816,11 @@ function run(cfg, opts = {}) {
 
 async function runInner(cfgIn, opts) {
   const cfg = normalizeCfg(cfgIn);
+  // Defence in depth: the app checks the page URL before sending data; refuse here too if the page
+  // navigated to a site that is not part of this application.
+  if (Array.isArray(cfg.allowedSites) && cfg.allowedSites.length && !cfg.allowedSites.includes(siteOf(location.hostname))) {
+    return { status: 'blocked-site', url: location.href, filledCount: 0, unanswered: [] };
+  }
   S.cfg = cfg;
   S.unansweredEls = [];
   const detected = cfg.ats || detectAts(cfg.job, location.href);
@@ -897,6 +902,8 @@ Object.defineProperty(window, '__ApplyPilotAutofill', {
   value: Object.freeze({
     version: VERSION,
     run,
+    /** Posts 'ready' (with the page URL) so the app can decide whether this page may receive data. */
+    ping: () => post('ready', 'Auto-fill engine loaded', { version: VERSION, url: location.href, host: location.hostname }),
     cancelSubmit: () => cancelSubmit('app'),
     detectCaptcha,
     isConfirmation: (ats) => isConfirmation(ats || (S.cfg && S.cfg.ats) || 'generic'),
@@ -904,4 +911,3 @@ Object.defineProperty(window, '__ApplyPilotAutofill', {
     state: () => ({ submitArmed: S.submitArmed, submitClicked: S.submitClicked, submitted: S.submitted, last: S.lastSummary }),
   }),
 });
-post('ready', 'Auto-fill engine loaded', { version: VERSION });

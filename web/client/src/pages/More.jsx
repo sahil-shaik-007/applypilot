@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, MessageSquareText, Sparkles, Globe, Settings as Cog, ChevronRight, Download, Lock, LogOut, ShieldCheck } from 'lucide-react';
+import { FileText, MessageSquareText, Sparkles, Globe, Settings as Cog, ChevronRight, Download, Lock, LogOut, ShieldCheck, User, Rocket, Users } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
 import { Logo, stagger } from '../components/ui.jsx';
 import { motion } from 'framer-motion';
@@ -10,7 +10,10 @@ export default function More() {
   const [installable, setInstallable] = useState(canInstall());
   useEffect(() => onInstallable(setInstallable), []);
   const items = [
+    { id: 'profile', icon: User, label: 'Your profile', sub: 'Everything forms ask for, filled once' },
+    { id: 'campaigns', icon: Rocket, label: 'Campaigns', sub: `${app.campaigns.length} campaign${app.campaigns.length === 1 ? '' : 's'} · ${app.campaigns.filter((c) => c.status === 'running').length} running` },
     { id: 'resumes', icon: FileText, label: 'Resumes', sub: `${app.resumes.length} uploaded` },
+    { id: 'network', icon: Users, label: 'Referrals', sub: app.networkMeta && app.networkMeta.count ? `${app.networkMeta.count} connections` : 'Import LinkedIn connections' },
     { id: 'answers', icon: MessageSquareText, label: 'Answer bank', sub: `${app.qa.length} saved answers` },
     { id: 'ai', icon: Sparkles, label: 'AI studio', sub: app.settings.anthropicKey ? 'Key added' : 'Add your Anthropic key' },
     { id: 'platforms', icon: Globe, label: 'Job platforms', sub: '250+ boards, deep-linked' },

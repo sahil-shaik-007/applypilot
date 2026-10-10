@@ -2,13 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import {
   MapPin, Clock, ExternalLink, Bookmark, BookmarkCheck, Send, Zap, Sparkles, FileText, ShieldCheck, CircleAlert,
-  Laptop, Smartphone, X, Info, Undo2, Search, Check, Download, Plane, Copy,
+  Laptop, Smartphone, X, Info, Undo2, Search, Check, Download, Plane, Copy, Users, Banknote, GraduationCap, MessageSquareText, Building2, Newspaper, Star as StarIcon, MessagesSquare,
 } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
-import { Button, Sheet, Logo, ScoreRing, StatusBadge, Seg, timeAgo, salary, stagger, CopyRow, copyText, downloadFile } from './ui.jsx';
+import { Button, Sheet, Logo, ScoreRing, StatusBadge, Seg, timeAgo, salary, stagger, CopyRow, copyText, downloadFile, Markdown } from './ui.jsx';
 import { AUTO_ATS, saveJob, unsaveJob, sendToLaptop, skipJob, upsertApplication, pickResume, openExternal, findApplication } from '../lib/apply.js';
 import { safeId } from '../lib/sync.js';
-import { coverLetter, tailorResume, aiError, DEFAULT_MODEL } from '../lib/ai.js';
+import { coverLetter, tailorResume, outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
+import { canApplyInApp, openUrl } from '../lib/bridge.js';
+import { allConnections, peopleAt, researchLinks } from '../lib/network.js';
+import { marketPay } from '../lib/insights.js';
+import { startInAppApply, TailoredCard } from './apply.jsx';
 
 export function SponsorBadge({ s }) {
   if (s === 'offered') return <span className="badge green" data-testid="sponsor-badge"><Plane size={10} />Sponsors visa</span>;
@@ -107,6 +111,51 @@ function useSaved(job) {
   return saved;
 }
 
+const LINK_ICON = { people: Users, company: Building2, glassdoor: StarIcon, ambitionbox: StarIcon, interview: MessagesSquare, news: Newspaper };
+
+/** Market pay for similar roles (25th-75th percentile of jobs seen on this device + tracker). */
+export function MarketPay({ job }) {
+  const app = useApp();
+  const m = useMemo(() => (job ? marketPay(job, app.applications, app.savedJobs) : null), [job && job.id, app.applications, app.savedJobs]); // eslint-disable-line
+  if (!m || !m.median) return null;
+  return (
+    <div className="card pad row" style={{ gap: 12, alignItems: 'flex-start' }} data-testid="market-pay">
+      <Banknote size={18} color="var(--green)" style={{ flexShrink: 0, marginTop: 2 }} />
+      <div className="grow">
+        <div className="label" style={{ margin: 0 }}>Market pay for similar roles</div>
+        <div style={{ fontWeight: 700 }}>{salary({ salaryMin: m.p25, salaryMax: m.p75, salaryCurrency: m.currency })} <span className="small muted">· median {salary({ salaryMin: m.median, salaryCurrency: m.currency })}</span></div>
+        <div className="tiny dim">From {m.count} similar jobs you've seen (25th–75th percentile). Use it to set your expected salary.</div>
+      </div>
+    </div>
+  );
+}
+
+/** People you know at the company (imported LinkedIn connections) + research links. */
+export function ResearchCard({ job, onClose }) {
+  const app = useApp();
+  const people = useMemo(() => peopleAt(allConnections(app.sync), job.company), [job.company, app.rev]); // eslint-disable-line
+  return (
+    <div className="card pad col" style={{ gap: 10 }} data-testid="research-card">
+      <div className="section-title" style={{ margin: 0 }}><Users size={14} />Research & referrals</div>
+      {people.length > 0 && (
+        <div>
+          <div className="small" style={{ fontWeight: 700, color: 'var(--green)', marginBottom: 4 }} data-testid="people-count">You know {people.length} {people.length === 1 ? 'person' : 'people'} at {job.company}</div>
+          {people.slice(0, 6).map((p) => (
+            <div key={p.id} className="person-row">
+              <div className="grow"><div className="small ellipsis" style={{ fontWeight: 600 }}>{p.name}</div><div className="tiny dim ellipsis">{p.position}</div></div>
+              {p.url && <Button size="sm" variant="ghost" icon={ExternalLink} aria-label={`Open ${p.name}'s profile`} onClick={() => openUrl(p.url)} />}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="chips">
+        {researchLinks(job).map((l) => { const I = LINK_ICON[l.id] || ExternalLink; return <button type="button" key={l.id} className="chip" onClick={() => openUrl(l.url)}><I size={12} />{l.label}</button>; })}
+      </div>
+      <div className="tiny dim">{people.length ? 'Ask one of them for a referral: AI tools → "Ask for referral" writes the message.' : <>A referral makes an interview several times more likely. <a href="#/network" onClick={(e) => { e.preventDefault(); if (onClose) onClose(); go('network'); }}>Import your LinkedIn connections</a> to see who you know here.</>}</div>
+    </div>
+  );
+}
+
 export function ResumeSelect({ value, onChange }) {
   const app = useApp();
   return (
@@ -134,7 +183,13 @@ export function JobSheet({ job, onClose }) {
   const scam = isScam(job);
 
   const run = async (k, fn, ok) => { setBusy(k); try { await fn(); if (ok) app.toast(ok, 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } };
-  const applyHere = () => {
+  const native = canApplyInApp();
+  const applyHere = async () => {
+    if (native) {
+      setBusy('inapp');
+      try { await startInAppApply(app, { job, resumeId, mode }); } finally { setBusy(null); }
+      return;
+    }
     openExternal(job.applyUrl || job.url);
     setQuick(true);
   };
@@ -149,7 +204,7 @@ export function JobSheet({ job, onClose }) {
             <div className="grow">
               <h2 style={{ margin: '2px 0 0' }} data-testid="job-title">{job.title}</h2>
               <div className="row wrap small muted" style={{ marginTop: 4, gap: 10 }}>
-                <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{job.company}</span>
+                <span style={{ color: 'var(--fg)', fontWeight: 600 }} data-testid="job-company">{job.company}</span>
                 {job.location && <span className="row" style={{ gap: 4 }}><MapPin size={12} />{job.location}</span>}
                 {job.postedAt && <span className="row" style={{ gap: 4 }}><Clock size={12} />{timeAgo(job.postedAt)}</span>}
                 <span>{salary(job)}</span>
@@ -160,7 +215,7 @@ export function JobSheet({ job, onClose }) {
         footer={job && (
           <div className="col" style={{ gap: 8, width: '100%' }}>
             {scam && <div className="tiny" style={{ color: 'var(--red)', textAlign: 'center' }}>Applying is disabled: this posting looks like a scam. Never pay a fee or share ID documents.</div>}
-            <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={Smartphone} onClick={applyHere} disabled={scam} data-testid="apply-here" block>Apply on this phone</Button>
+            <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={native ? Zap : Smartphone} loading={busy === 'inapp'} onClick={applyHere} disabled={scam} data-testid="apply-here" block>{native ? 'Apply in app' : 'Apply on this phone'}</Button>
             <div className="grid g2" style={{ gap: 8 }}>
               <Button icon={queued ? Check : Laptop} loading={busy === 'send'} disabled={queued || scam} data-testid="send-laptop" onClick={() => run('send', () => sendToLaptop(app, job, { resumeId, mode }), mode === 'auto' ? 'Sent to your laptop. It applies on autopilot when the desktop app is next online.' : 'Sent to your laptop. It will be waiting in the Review queue there: one click fills it in.')}>{queued ? 'Queued' : 'Send to laptop'}</Button>
               <Button icon={saved ? BookmarkCheck : Bookmark} loading={busy === 'save'} data-testid="save-job" onClick={() => run('save', () => (saved ? unsaveJob(app, job) : saveJob(app, job)), saved ? 'Removed from saved' : 'Saved to Applications')}>{saved ? 'Saved' : 'Save'}</Button>
@@ -180,6 +235,8 @@ export function JobSheet({ job, onClose }) {
               <div className="col" style={{ gap: 14 }}>
                 <Blockers job={job} />
                 <MatchBreakdown m={job.match} />
+                <MarketPay job={job} />
+                <ResearchCard job={job} onClose={onClose} />
                 {(job.tags || []).length > 0 && <div className="chips">{job.tags.slice(0, 10).map((t) => <span key={t} className="badge">{t}</span>)}</div>}
                 <div className="prewrap small" style={{ color: '#d4d4d4', lineHeight: 1.7 }}>
                   {desc ? (more || desc.length < 1400 ? desc : `${desc.slice(0, 1400)}…`) : 'No description provided. Open the posting for details.'}
@@ -194,14 +251,16 @@ export function JobSheet({ job, onClose }) {
                   <div><span className="label">Resume</span><ResumeSelect value={resumeId} onChange={setResumeId} />
                     {!app.resumes.length && <div className="small" style={{ color: 'var(--amber)', marginTop: 6 }}>Upload a resume first (More → Resumes).</div>}</div>
                   <div>
-                    <span className="label">When it reaches your laptop</span>
+                    <span className="label">{native ? 'How to apply' : 'Apply mode'}</span>
                     <Seg full value={mode} onChange={setMode} options={[{ value: 'review', label: 'Fill, I submit' }, { value: 'auto', label: 'Autopilot' }]} />
-                    <div className="small muted" style={{ marginTop: 8 }}>{mode === 'auto' ? (canAuto ? 'The desktop app fills and submits when every required answer is known; anything uncertain waits for you.' : 'This site doesn\'t allow automated submission, so the desktop app fills it and you click submit.') : 'The desktop app opens the form filled in. You review it and press submit.'}</div>
+                    <div className="small muted" style={{ marginTop: 8 }}>{mode === 'auto' ? (canAuto ? `Fills every field and submits after a ${app.settings.submitDelaySeconds ?? 30}s cancel window when every required answer is known; anything uncertain waits for you. Applies to "Apply in app" and "Send to laptop".` : 'This site doesn\'t allow automated submission, so ApplyPilot fills it and you press submit.') : 'The form opens filled in. You review it and press submit.'}</div>
                   </div>
                 </div>
+                <TailoredCard job={job} resumeId={resumeId} />
                 <div className="card pad col" style={{ gap: 10 }}>
-                  <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />Applying on your phone?</div>
-                  <div className="small muted">We open the application in a new tab and give you one-tap copy for every field.</div>
+                  <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />Applying on your phone</div>
+                  <div className="small muted">{native ? 'Apply in app opens the form inside ApplyPilot and fills it from your profile, answers and resume. Quick-fill gives one-tap copy for every field.' : 'We open the application in a new tab and give you one-tap copy for every field.'}</div>
+                  {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} disabled={scam} onClick={applyHere} data-testid="apply-inapp">Apply in app</Button>}
                   <Button icon={Copy} disabled={scam} onClick={() => setQuick(true)} data-testid="open-quickfill">Open Quick-fill</Button>
                   <Button icon={Check} loading={busy === 'applied'} disabled={application && application.status === 'applied'} onClick={() => run('applied', () => upsertApplication(app, job, 'applied', { resumeId }), 'Marked as applied')}>Mark as applied</Button>
                 </div>
@@ -238,9 +297,10 @@ export function AiTools({ job, resumeId }) {
   const [busy, setBusy] = useState(null);
   const [out, setOut] = useState({});
   useEffect(() => setOut({}), [job && job.id]);
-  const runAi = async (k, fn) => {
+  const people = useMemo(() => peopleAt(allConnections(app.sync), job.company), [job.company, app.rev]); // eslint-disable-line
+  const runAi = async (k, fn, extra = {}) => {
     setBusy(k);
-    try { const r = await fn({ ...args, job }); setOut((o) => ({ ...o, [k]: r })); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(null); }
+    try { const r = await fn({ ...args, job, ...extra }); setOut((o) => ({ ...o, [k]: r })); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(null); }
   };
   return (
     <div className="col" style={{ gap: 12 }}>
@@ -248,9 +308,16 @@ export function AiTools({ job, resumeId }) {
       <div className="grid g2">
         <Button icon={Sparkles} loading={busy === 'tailor'} disabled={!args.apiKey} onClick={() => runAi('tailor', tailorResume)}>ATS check</Button>
         <Button icon={FileText} loading={busy === 'cover'} disabled={!args.apiKey} onClick={() => runAi('cover', coverLetter)}>Cover letter</Button>
+        <Button icon={GraduationCap} loading={busy === 'prep'} disabled={!args.apiKey} onClick={() => runAi('prep', interviewPrep)}>Interview prep</Button>
+        <Button icon={MessageSquareText} loading={busy === 'recruiter'} disabled={!args.apiKey} onClick={() => runAi('recruiter', outreach, { kind: 'recruiter' })}>Recruiter note</Button>
+        <Button icon={Users} loading={busy === 'referral'} disabled={!args.apiKey} onClick={() => runAi('referral', outreach, { kind: 'referral', contactName: people[0] ? people[0].name.split(' ')[0] : '' })} data-testid="ai-referral">Ask for referral</Button>
       </div>
+      <TailoredCard job={job} resumeId={resumeId} />
       {out.tailor && <TailorResult r={out.tailor} />}
       {out.cover && <TextResult title="Cover letter" text={out.cover} />}
+      {out.referral && <TextResult title={people[0] ? `Referral request to ${people[0].name}` : 'Referral request'} text={out.referral} />}
+      {out.recruiter && <TextResult title="Recruiter message" text={out.recruiter} />}
+      {out.prep && <div className="card pad"><div className="section-title">Interview prep</div><Markdown text={out.prep} /></div>}
     </div>
   );
 }
@@ -258,7 +325,7 @@ export function AiTools({ job, resumeId }) {
 export function TextResult({ title, text }) {
   const app = useApp();
   return (
-    <motion.div className="card pad" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+    <motion.div className="card pad" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} data-testid="ai-text-result">
       <div className="row between"><div className="section-title" style={{ margin: 0 }}>{title}</div><Button size="sm" variant="ghost" icon={Copy} onClick={async () => { await copyText(text); app.toast('Copied', 'success'); }}>Copy</Button></div>
       <div className="prewrap small" style={{ marginTop: 10, lineHeight: 1.7 }}>{text}</div>
     </motion.div>

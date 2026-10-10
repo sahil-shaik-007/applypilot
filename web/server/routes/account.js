@@ -20,13 +20,16 @@ export function accountRoutes(ctx) {
       deleted: !!row.deleted,
     }));
     const blobs = repo.q.blobIds.all(uid).map((b) => b.id);
-    res.json({ vault: v ? JSON.parse(v.doc) : null, items, blobs });
+    // The plaintext data we hold: watchlist queries and push registrations (not their endpoint/token secrets).
+    const watchlist = repo.q.watchList.all(uid).map((w) => ({ id: w.id, q: w.q, location: w.location, remote: w.remote, createdAt: w.created_at }));
+    const push = repo.q.pushListUser.all(uid).map((p) => ({ id: p.id, type: p.type, createdAt: p.created_at, lastOkAt: p.last_ok_at ?? null }));
+    res.json({ vault: v ? JSON.parse(v.doc) : null, items, blobs, watchlist, push });
   });
 
   r.delete('/account', session, limiters.writes, (req, res) => {
     if (!isPlainObject(req.body) || req.body.confirm !== 'DELETE') throw new HttpError(400, 'Send { "confirm": "DELETE" } to delete your account');
     repo.deleteUserEverything(req.auth.user.id);
-    clearSessionCookies(res);
+    if (req.auth.transport === 'cookie') clearSessionCookies(res);
     res.json({ ok: true });
   });
 

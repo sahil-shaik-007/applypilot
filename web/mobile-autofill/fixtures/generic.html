@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Careers - Apply</title>
+<style>body{font:15px system-ui,sans-serif;padding:16px;max-width:640px}p label{display:block;font-weight:600}input,select,textarea{width:100%;box-sizing:border-box;padding:8px}</style></head>
+<body>
+<header><nav><input type="search" placeholder="Search site" name="q"></nav></header>
+<div id="cookie" role="dialog"><p>We use cookies.</p><button type="button" id="accept-cookies">Accept all</button><button type="button" id="reject-cookies">Reject all</button></div>
+<main><h1>Apply: Data Analyst</h1>
+<form data-thanks>
+  <p><label for="fn">First name *</label><input id="fn" name="fname" required></p>
+  <p><label for="ln">Surname *</label><input id="ln" name="lname" required></p>
+  <p><label for="em">E-mail address *</label><input id="em" type="email" name="email" required></p>
+  <p><label for="tel">Mobile number</label><input id="tel" type="tel" name="mobile"></p>
+  <p><label for="country">Country of residence *</label><select id="country" name="country" required><option value="">Please choose</option><option>India</option><option>United Kingdom</option><option>United States of America</option></select></p>
+  <p><label for="notice">Notice period</label><select id="notice" name="notice"><option value="">--</option><option>Immediately</option><option>2 weeks</option><option>1 month</option><option>3 months</option></select></p>
+  <p><label for="sal">Expected salary (USD)</label><input id="sal" name="expected_salary" type="number"></p>
+  <p><label for="cv">Upload your CV *</label><input id="cv" type="file" name="cv" required></p>
+  <p><label for="date">Earliest start date</label><input id="date" type="date" name="start"></p>
+  <fieldset><legend>Are you over 18 years of age? *</legend><label><input type="radio" name="adult" value="y" required> Yes</label><label><input type="radio" name="adult" value="n"> No</label></fieldset>
+  <p><label><input type="checkbox" name="marketing"> Send me marketing emails and newsletters</label></p>
+  <p><label for="pw2">Password</label><input id="pw2" type="password" name="password"></p>
+  <button type="submit">Submit</button>
+</form></main>
+<footer><input type="email" name="footer-news" placeholder="Newsletter"></footer>
+<script>
+window.__cookie = '';
+document.getElementById('accept-cookies').onclick = function () { window.__cookie = 'accepted'; document.getElementById('cookie').remove(); };
+document.getElementById('reject-cookies').onclick = function () { window.__cookie = 'rejected'; document.getElementById('cookie').remove(); };
+</script>
+<script src="/widgets.js"></script>
+</body></html>

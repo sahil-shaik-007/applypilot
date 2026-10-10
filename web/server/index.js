@@ -17,6 +17,11 @@ try {
 if (config.production && !config.googleClientId) {
   console.warn('[applypilot-cloud] GOOGLE_CLIENT_ID is not set: nobody will be able to sign in.');
 }
+if (config.production && !config.push.subject) {
+  console.warn('[applypilot-cloud] VAPID_SUBJECT is not set: using APP_ORIGIN as the Web Push contact.');
+}
+if (!config.push.fcm) console.log('[applypilot-cloud] FCM not configured (FCM_SERVICE_ACCOUNT): Android push is skipped.');
+if (!config.push.apns) console.log('[applypilot-cloud] APNs not configured (APNS_*): iOS push is skipped.');
 if (config.devLogin) {
   console.warn('[applypilot-cloud] DEV LOGIN ENABLED (AP_DEV_LOGIN=1). Anyone can sign in as any email. Never use outside local development.');
 }

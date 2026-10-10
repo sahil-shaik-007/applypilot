@@ -151,7 +151,7 @@ export function AppProvider({ children }) {
   // ---------------- derived decrypted data
   const data = useMemo(() => {
     const s = syncRef.current;
-    if (!s) return { profile: {}, settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [], campaigns: [], networkMeta: null };
+    if (!s) return { profile: {}, settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [], campaigns: [], networkMeta: null, careerPages: [] };
     const byDate = (k) => (a, b) => String(b[k] || '').localeCompare(String(a[k] || ''));
     return {
       profile: (s.get('profile', 'main') || {}).values || {},
@@ -163,6 +163,7 @@ export function AppProvider({ children }) {
       savedJobs: s.entries('savedJobs').map((r) => ({ ...r.data, recordId: r.id })),
       campaigns: s.list('campaigns').sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))),
       networkMeta: s.get('network', 'meta') || null,
+      careerPages: s.list('careerPages').sort(byDate('addedAt')),
     };
   }, [rev]);
 

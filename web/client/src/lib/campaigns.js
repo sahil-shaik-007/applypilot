@@ -179,8 +179,8 @@ export async function runCampaign(app, c, { signal } = {}) {
 }
 
 /** Due = running, allowed on this device, and never run or past nextRunAt. */
-export function dueCampaigns(campaigns, now = Date.now()) {
-  return campaigns.filter((c) => c.status === 'running' && c.runOn !== 'desktop' && !isBusy(c.id) && (!c.nextRunAt || new Date(c.nextRunAt).getTime() <= now));
+export function dueCampaigns(campaigns, now = Date.now(), force = new Set()) {
+  return campaigns.filter((c) => c.status === 'running' && c.runOn !== 'desktop' && !isBusy(c.id) && (force.has(c.id) || !c.nextRunAt || new Date(c.nextRunAt).getTime() <= now));
 }
 
 let schedulerBusy = false;
@@ -189,7 +189,14 @@ export async function tick(app) {
   if (schedulerBusy || !app || !app.sync || document.hidden) return;
   const settings = app.sync.get('settings', 'main') || {};
   if (settings.campaignsOnPhone === false) return;
-  const due = dueCampaigns(app.sync.list('campaigns'));
+  // Campaigns whose searches the native background check found new jobs for run now.
+  let force = new Set();
+  try {
+    const bg = nat().background;
+    const pending = typeof bg.consumePending === 'function' ? await bg.consumePending() : [];
+    force = new Set((pending || []).map((x) => x && x.campaignId).filter(Boolean));
+  } catch { /* web / not supported */ }
+  const due = dueCampaigns(app.sync.list('campaigns'), Date.now(), force);
   if (!due.length) return;
   schedulerBusy = true;
   try {

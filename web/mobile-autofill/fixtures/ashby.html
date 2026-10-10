@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Application · Product Engineer @ Acme</title>
+<style>body{font:15px system-ui,sans-serif;margin:0;padding:16px;max-width:640px}
+.ashby-application-form-field-entry{margin:14px 0}.ashby-application-form-question-title{font-weight:600;display:block;margin-bottom:4px}
+input[type=text],input[type=email],input[type=tel],textarea{width:100%;box-sizing:border-box;padding:8px}
+.yesno button{padding:8px 18px;margin-right:6px}.yesno button[aria-pressed=true]{background:#4f46e5;color:#fff}
+.select__control{border:1px solid #999;padding:6px;display:flex}.select__value-container{display:flex;flex:1}.select__control input{border:0;min-width:60px}</style></head>
+<body>
+<div class="ashby-job-posting-header"><h1>Product Engineer</h1><input type="text" name="header-search" placeholder="Search"></div>
+<div class="ashby-application-form-container">
+  <div class="ashby-application-form-autofill-pane"><p>Autofill from resume</p><input type="file" id="autofill-resume"></div>
+  <form data-thanks>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_name">Name *</label><input id="_systemfield_name" name="_systemfield_name" type="text" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_email">Email *</label><input id="_systemfield_email" name="_systemfield_email" type="email" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_resume">Resume *</label><input id="_systemfield_resume" name="_systemfield_resume" type="file" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="phone">Phone Number</label><input id="phone" type="tel" name="phone"></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="loc">Location *</label>
+      <div class="select__control" data-combo data-async="1" data-menu="loc-menu" data-options='["San Francisco, CA, US","San Jose, CA, US"]'>
+        <div class="select__value-container"><input id="loc" role="combobox" aria-autocomplete="list" aria-required="true" aria-controls="loc-menu"></div></div>
+      <div role="listbox" id="loc-menu" hidden></div></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title">Are you authorized to work in the United States? *</label>
+      <div class="yesno"><button type="button" aria-pressed="false">Yes</button><button type="button" aria-pressed="false">No</button><input type="checkbox" required tabindex="-1" style="position:absolute;opacity:0;width:1px;height:1px"></div></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title">Will you require visa sponsorship? *</label>
+      <div class="yesno"><button type="button" aria-pressed="false">Yes</button><button type="button" aria-pressed="false">No</button></div></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="salary">What are your salary expectations?</label><input id="salary" type="text" name="salary"></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="bug">Tell us about the most interesting bug you have fixed *</label><textarea id="bug" required></textarea></div>
+    <button type="submit" class="ashby-application-form-submit-button">Submit Application</button>
+  </form>
+</div>
+<script>
+document.querySelectorAll('.yesno').forEach(function (g) {
+  g.querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { g.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); }); var c = g.querySelector('input'); if (c) c.checked = true; }); });
+});
+</script>
+<script src="/widgets.js"></script>
+</body></html>

@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "node scripts/gen-icons.mjs && vite build",
     "preview": "vite preview --port 5174",
-    "e2e": "node e2e/mobile.e2e.mjs"
+    "e2e": "node e2e/mobile.e2e.mjs",
+    "icons:android": "node android/scripts/icons.mjs",
+    "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File android/build-local.ps1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

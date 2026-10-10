@@ -170,7 +170,11 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
       resume: { name: resume.name, bytes: resume.bytes, mime: resume.mime },
       coverLetter: letter,
       mode: effMode,
+      // The native filler runs its own in-page cancel window (Hold / Submit now inside the WebView,
+      // minimum 3 s); `beforeSubmit` is the app-side window for fillers that delegate it to us.
+      cancelWindowSec: Math.max(3, submitDelay(app)),
       submitDelaySeconds: submitDelay(app),
+      ignoreEligibility: !!force,
       signal: abort.signal,
       beforeSubmit: () => cancelWindow(app, a.id, job),
       answerQuestion: async (question, info = {}) => {

@@ -7,7 +7,7 @@ import express from 'express';
 import { assertConfigSafe } from './config.js';
 import { openDb } from './db.js';
 import { HttpError, createClock } from './util.js';
-import { securityHeaders, authenticate, requireAuth } from './security.js';
+import { securityHeaders, authenticate, requireAuth, nativeCors } from './security.js';
 import { createLimiters } from './limits.js';
 import { createGoogleVerifier } from './google.js';
 import { createJobSearch, loadPlatforms } from './jobs.js';
@@ -15,6 +15,11 @@ import { authRoutes } from './routes/auth.js';
 import { syncRoutes } from './routes/sync.js';
 import { deviceRoutes } from './routes/devices.js';
 import { accountRoutes } from './routes/account.js';
+import { watchlistRoutes } from './routes/watchlist.js';
+import { pushRoutes } from './routes/push.js';
+import { createHistory } from './history.js';
+import { createWatch } from './watch.js';
+import { createPush } from './push.js';
 
 function requestLogger(config) {
   return (req, res, next) => {
@@ -32,7 +37,7 @@ function requestLogger(config) {
 
 /**
  * @param {object} config  from loadConfig()
- * @param {object} [deps]  { repo, googleVerifier, aggregator, jobSearch }
+ * @param {object} [deps]  { repo, googleVerifier, aggregator, jobSearch, push, pushDeps, watchDeps, clock }
  */
 export function createApp(config, deps = {}) {
   assertConfigSafe(config);
@@ -43,8 +48,15 @@ export function createApp(config, deps = {}) {
     clock: deps.clock || createClock(),
     limiters: createLimiters(config),
     googleVerifier: deps.googleVerifier !== undefined ? deps.googleVerifier : (config.googleClientId ? createGoogleVerifier() : null),
-    jobSearch: deps.jobSearch || createJobSearch({ aggregator: deps.aggregator, limits: config.limits }),
   };
+  ctx.history = createHistory({ repo, limits: config.limits });
+  ctx.jobSearch = deps.jobSearch || createJobSearch({ aggregator: deps.aggregator, limits: config.limits, onFresh: (jobs) => ctx.history.record(jobs) });
+  if (deps.push !== undefined) ctx.push = deps.push;
+  else {
+    try { ctx.push = createPush(ctx, deps.pushDeps); } catch (e) { ctx.push = null; console.error(`[push] disabled: ${e && e.message}`); }
+  }
+  ctx.watch = createWatch(ctx, deps.watchDeps);
+  if (config.watchEnabled) ctx.watch.start();
 
   const app = express();
   app.disable('x-powered-by');
@@ -58,7 +70,10 @@ export function createApp(config, deps = {}) {
   // ------------------------------------------------------------------ API
   const api = express.Router();
   api.use((req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+  api.use(nativeCors(config)); // Capacitor app origins only; before the limiter so 429s are readable by the app
   api.use(ctx.limiters.api);
+  // Small bodies for endpoints that never need more; the general limit applies to sync uploads.
+  api.use(['/auth', '/devices', '/sessions', '/watchlist', '/push', '/jobs', '/account'], express.json({ limit: config.limits.smallJsonBody }));
   api.use(express.json({ limit: config.limits.jsonBody }));
   api.use(authenticate(ctx));
 
@@ -69,10 +84,12 @@ export function createApp(config, deps = {}) {
   api.use(syncRoutes(ctx));
   api.use(deviceRoutes(ctx));
   api.use(accountRoutes(ctx));
+  api.use(watchlistRoutes(ctx));
+  api.use(pushRoutes(ctx));
 
   api.get('/jobs/search', requireAuth(ctx, 'any'), ctx.limiters.search, async (req, res) => {
     const { jobs, stats, cached } = await ctx.jobSearch.search(req.query);
-    res.json({ jobs, stats, cached });
+    res.json({ jobs: ctx.history.annotate(jobs), stats, cached });
   });
   api.get('/jobs/platforms', (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -112,10 +129,10 @@ export function createApp(config, deps = {}) {
     res.status(500).json({ error: 'Internal server error' });
   });
 
-  const purge = setInterval(() => { try { repo.purgeExpired(Date.now()); } catch { /* ignore */ } }, 60 * 60 * 1000);
+  const purge = setInterval(() => { try { repo.purgeExpired(Date.now(), config.limits); } catch { /* ignore */ } }, 60 * 60 * 1000);
   purge.unref();
 
-  return { app, ctx, close: () => { clearInterval(purge); if (!deps.repo) repo.close(); } };
+  return { app, ctx, close: () => { clearInterval(purge); ctx.watch.stop(); if (!deps.repo) repo.close(); } };
 }
 
 /** Starts an HTTP server. Resolves with { server, url, ctx, close }. */

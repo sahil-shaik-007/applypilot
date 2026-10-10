@@ -33,9 +33,13 @@ function endSession(repo, auth) {
   });
 }
 
-/** Drops the caller's current session (if any) before issuing a new one: no session fixation. */
-function rotate(ctx, req) {
-  if (req.auth?.kind === 'session') endSession(ctx.repo, req.auth);
+/**
+ * Drops the caller's current session of the same transport (if any) before issuing a new one: no session
+ * fixation. A native sign-in never touches the browser's cookie session and vice versa.
+ */
+function rotate(ctx, req, native) {
+  const a = req.auth;
+  if (a?.kind === 'session' && a.transport === (native ? 'bearer' : 'cookie')) endSession(ctx.repo, a);
 }
 
 /** Parses the sign-in mode: { native, name, platform }. */
@@ -54,7 +58,7 @@ function signInMode(body) {
 
 /** Finishes a sign-in: cookies for the web, { token } for native apps. */
 function issue(ctx, req, res, user, mode) {
-  rotate(ctx, req);
+  rotate(ctx, req, mode.native);
   if (!mode.native) {
     startSession(ctx, res, user.id);
     return res.json({ user: userView(user) });

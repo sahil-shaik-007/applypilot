@@ -1,0 +1,84 @@
+# ApplyPilot Cloud CI: server tests, PWA build, and a Docker build + health smoke test of web/Dockerfile.
+name: web
+
+on:
+  push:
+    branches: [main, 'ci/**', 'release/**']
+    paths: ['web/**', 'electron/connectors/**', 'electron/data/**', '.github/workflows/web.yml']
+  pull_request:
+    paths: ['web/**', 'electron/connectors/**', 'electron/data/**', '.github/workflows/web.yml']
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            web/client/package-lock.json
+
+      - name: Server dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Server + shared crypto tests
+        working-directory: web
+        run: npm test
+
+      - name: PWA dependencies
+        working-directory: web/client
+        run: npm ci --no-audit --no-fund
+
+      - name: PWA build
+        working-directory: web/client
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply web/.dockerignore to the repo-root build context
+        run: cp web/.dockerignore web/Dockerfile.dockerignore
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/Dockerfile
+          tags: applypilot-cloud:ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (/api/health as production, non-root, with a volume)
+        run: |
+          docker run -d --name ap -p 8787:8787 -v apdata:/data \
+            -e APP_ORIGIN=https://ci.example.com applypilot-cloud:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health; then echo; break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8787/api/health
+          curl -fsS -o /dev/null -w 'GET / -> %{http_code}\n' http://127.0.0.1:8787/
+          test "$(docker exec ap id -un)" = node
+          docker logs ap
+          docker rm -f ap

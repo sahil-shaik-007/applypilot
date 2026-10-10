@@ -1,0 +1,117 @@
+# Desktop app CI: test + package the Windows installer (and the Microsoft Store package).
+# Runs on pushes/PRs and is reused by release.yml (workflow_call) for tagged releases.
+# Never publishes anything itself: it uploads the build as a workflow artifact.
+name: windows
+
+on:
+  push:
+    branches: [main, 'ci/**', 'release/**']
+    paths-ignore: ['web/**', 'docs/**', 'store/**', '**/*.md', '.github/workflows/web.yml']
+  pull_request:
+    paths-ignore: ['web/**', 'docs/**', 'store/**', '**/*.md', '.github/workflows/web.yml']
+  workflow_dispatch:
+    inputs:
+      appx:
+        description: Also build the Microsoft Store package (.appx)
+        type: boolean
+        default: true
+      e2e:
+        description: Run the desktop E2E suite (--quick)
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      appx:
+        type: boolean
+        default: true
+      e2e:
+        type: boolean
+        default: false
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # Optional signing secrets. Empty values are ignored by scripts/release.js (unsigned build).
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SIGN_ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
+      AZURE_SIGN_ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
+      AZURE_SIGN_PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
+      AZURE_SIGN_PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
+      # Microsoft Store identity from Partner Center (repo variables). Unset = TODO placeholders.
+      APPX_IDENTITY_NAME: ${{ vars.APPX_IDENTITY_NAME }}
+      APPX_PUBLISHER: ${{ vars.APPX_PUBLISHER }}
+      APPX_PUBLISHER_DISPLAY_NAME: ${{ vars.APPX_PUBLISHER_DISPLAY_NAME }}
+      ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install the Electron binary (npm may skip install scripts)
+        shell: bash
+        run: test -f node_modules/electron/path.txt || node node_modules/electron/install.js
+
+      - name: Build the UI
+        run: npm run build:ui
+
+      - name: Apply-engine self-test (local fixture, Edge, never contacts employers)
+        run: node scripts/apply-selftest.js
+
+      - name: Desktop E2E (quick, offline-safe checks)
+        # inputs are empty on push/PR (run), false/true on dispatch and workflow_call.
+        if: ${{ format('{0}', inputs.e2e) != 'false' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: node scripts/e2e.js --quick
+
+      - name: Package installer (NSIS)
+        run: node scripts/release.js build
+
+      - name: Package Microsoft Store app (APPX)
+        if: ${{ format('{0}', inputs.appx) != 'false' }}
+        run: node scripts/release.js build --appx-only --prepackaged
+
+      - name: Verify release artifacts (installer, blockmap, latest.yml, app-update.yml)
+        run: node scripts/release.js check
+
+      - name: Render winget manifests
+        run: node scripts/release.js winget --out release/winget
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: applypilot-windows
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.appx
+            release/latest.yml
+            release/winget/*.yaml

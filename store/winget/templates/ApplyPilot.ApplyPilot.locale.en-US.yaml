@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+PackageIdentifier: ApplyPilot.ApplyPilot
+PackageVersion: {{VERSION}}
+PackageLocale: en-US
+Publisher: ApplyPilot
+PublisherUrl: https://applypilot.app
+PublisherSupportUrl: https://applypilot.app/support
+PrivacyUrl: https://applypilot.app/privacy
+Author: Sahil Shaik
+PackageName: ApplyPilot
+PackageUrl: https://applypilot.app
+License: Proprietary
+LicenseUrl: https://applypilot.app/terms
+Copyright: Copyright (c) 2026 ApplyPilot
+ShortDescription: Search every job board at once and run auto-apply campaigns with the right resume for every role.
+Description: |-
+  ApplyPilot searches 25+ job sources and 700+ company career boards in parallel, scores every job against your
+  profile, and runs campaigns per role, each with its own resume. It fills applications on Greenhouse, Lever,
+  Ashby and other ATSs in a real browser, keeps a review queue so nothing is sent without you, saves unknown
+  questions to an answer bank, and tracks every application. Your data stays on your PC.
+Moniker: applypilot
+Tags:
+  - jobs
+  - job-search
+  - auto-apply
+  - resume
+  - career
+  - productivity
+ReleaseNotesUrl: {{RELEASE_NOTES_URL}}
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

@@ -18,7 +18,11 @@
     "dist:portable": "vite build && electron-builder --win portable --x64",
     "test:connectors": "node scripts/test-connectors.js",
     "license:keys": "node scripts/license-tool.js init",
-    "license:issue": "node scripts/license-tool.js issue"
+    "license:issue": "node scripts/license-tool.js issue",
+    "dist:store": "vite build && electron-builder --win appx --x64 --publish never",
+    "release": "node scripts/release.js",
+    "release:check": "node scripts/release.js check",
+    "release:winget": "node scripts/release.js winget"
   },
   "build": {
     "appId": "com.applypilot.desktop",
@@ -80,8 +84,30 @@
       "createStartMenuShortcut": true,
       "shortcutName": "ApplyPilot",
       "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
-    }
+      "uninstallerIcon": "build/icon.ico",
+      "differentialPackage": true
+    },
+    "appx": {
+      "identityName": "TODO.PartnerCenterIdentityName",
+      "publisher": "CN=TODO-PARTNER-CENTER-PUBLISHER-ID",
+      "publisherDisplayName": "TODO Partner Center publisher display name",
+      "applicationId": "ApplyPilot",
+      "displayName": "ApplyPilot",
+      "backgroundColor": "#0A0A0A",
+      "languages": [
+        "en-US"
+      ],
+      "showNameOnTiles": true,
+      "artifactName": "ApplyPilot-Store-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "sahil-shaik-007",
+        "repo": "applypilot-releases",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

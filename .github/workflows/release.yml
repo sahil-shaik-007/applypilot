@@ -1,0 +1,114 @@
+# Release pipeline. Push a tag (npm run release -- prepare 1.2.1 && git push origin HEAD --follow-tags):
+#   1. checks the tag matches package.json "version" and CHANGELOG.md has notes for it
+#   2. builds + tests the desktop app (windows.yml) and the cloud (web.yml)
+#   3. creates the GitHub Release with the installer, .blockmap and latest.yml (what electron-updater reads)
+#
+# Where the release goes:
+#   - secret RELEASES_TOKEN set  -> public repo sahil-shaik-007/applypilot-releases (package.json build.publish;
+#                                   this is what installed apps auto-update from)
+#   - not set                    -> this (private) repo, as a build archive. Installed apps can NOT update from it.
+# Run it by hand (Actions -> release -> Run workflow) to rehearse everything except the upload.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Actually create the GitHub Release (otherwise a dry run)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        name: Tag, package.json and CHANGELOG agree
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version $version"; exit 1
+          fi
+          node scripts/release.js notes "$version" > /dev/null
+
+  windows:
+    needs: verify
+    uses: ./.github/workflows/windows.yml
+    with:
+      appx: true
+      e2e: false
+    secrets: inherit
+
+  web:
+    needs: verify
+    uses: ./.github/workflows/web.yml
+
+  publish:
+    needs: [verify, windows, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      DO_PUBLISH: ${{ github.ref_type == 'tag' || inputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: applypilot-windows
+          path: dist-release
+
+      - name: Release notes
+        run: |
+          node scripts/release.js notes "$VERSION" > notes.md
+          {
+            echo
+            echo "---"
+            echo "**Install:** download \`ApplyPilot-Setup-$VERSION.exe\` and run it. Installed copies update themselves."
+            echo "Windows may show \"Windows protected your PC\" until the installer is code-signed: click *More info → Run anyway*."
+          } >> notes.md
+          ls -la dist-release dist-release/winget || true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$RELEASES_TOKEN" ]; then repo=sahil-shaik-007/applypilot-releases; else repo=$GITHUB_REPOSITORY; fi
+          prerelease=""; case "$VERSION" in *-*) prerelease="--prerelease";; esac
+          files="dist-release/ApplyPilot-Setup-$VERSION.exe dist-release/ApplyPilot-Setup-$VERSION.exe.blockmap dist-release/latest.yml"
+          ls -la $files
+          echo "Target: $repo  tag v$VERSION  $prerelease"
+          if [ "$DO_PUBLISH" != "true" ]; then echo "Dry run: not creating the release."; exit 0; fi
+          if [ -z "$RELEASES_TOKEN" ]; then
+            echo "::warning::RELEASES_TOKEN is not set: publishing to the private repo. Installed apps cannot auto-update from it."
+          fi
+          if gh release view "v$VERSION" --repo "$repo" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" $files --repo "$repo" --clobber
+          else
+            gh release create "v$VERSION" $files --repo "$repo" --title "ApplyPilot $VERSION" \
+              --notes-file notes.md $prerelease
+          fi
+          echo "### Released ApplyPilot $VERSION to https://github.com/$repo/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Next steps
+        run: |
+          {
+            echo "- **winget:** download the \`applypilot-windows\` artifact, then \`wingetcreate submit winget/\` (see store/winget/README.md)."
+            echo "- **Microsoft Store:** upload \`ApplyPilot-Store-$VERSION.appx\` from the artifact in Partner Center (built with the APPX_* repo variables)."
+          } >> "$GITHUB_STEP_SUMMARY"

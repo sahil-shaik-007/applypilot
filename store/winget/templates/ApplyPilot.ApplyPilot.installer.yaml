@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# electron-builder NSIS installer, per-user (build.nsis.perMachine = false). /S = silent.
+PackageIdentifier: ApplyPilot.ApplyPilot
+PackageVersion: {{VERSION}}
+MinimumOSVersion: 10.0.17763.0
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+InstallerSwitches:
+  Silent: /S
+  SilentWithProgress: /S
+  InstallLocation: /D=<INSTALLPATH>
+UpgradeBehavior: install
+# Uninstall key electron-builder derives from appId com.applypilot.desktop (stable across versions).
+ProductCode: 54524719-b6b8-5365-82fc-bdf07fd3b9dc
+ReleaseDate: {{RELEASE_DATE}}
+AppsAndFeaturesEntries:
+  - DisplayName: ApplyPilot {{VERSION}}
+    Publisher: ApplyPilot
+    DisplayVersion: {{VERSION}}
+    ProductCode: 54524719-b6b8-5365-82fc-bdf07fd3b9dc
+Installers:
+  - Architecture: x64
+    InstallerUrl: {{INSTALLER_URL}}
+    InstallerSha256: {{INSTALLER_SHA256}}
+ManifestType: installer
+ManifestVersion: 1.10.0

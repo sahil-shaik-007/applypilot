@@ -5,6 +5,7 @@ import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, Field, TagInput, Seg, Switch, Progress, timeAgo, stagger } from './ui.jsx';
 import { MODES, INTERVALS, intervalLabel, blankCampaign, saveCampaign, deleteCampaign, setRunning, runCampaign, useCampaignRuntime, PHASE } from '../lib/campaigns.js';
 import { attemptsToday } from '@shared/campaignRules.js';
+import { getProfile, resumePool } from '../lib/profiles.js';
 
 /** Create / edit a campaign (bottom sheet). `initial` = {} for new. */
 export function CampaignEditor({ initial, onClose }) {
@@ -14,6 +15,11 @@ export function CampaignEditor({ initial, onClose }) {
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setC({ ...blankCampaign(app), ...(initial || {}) }); }, [open]); // eslint-disable-line
   const up = (k) => (v) => setC((x) => ({ ...x, [k]: v }));
+  // Switching profile keeps the resume only when the new profile can use it (otherwise back to auto).
+  const setProfile = (id) => setC((x) => {
+    const usable = x.resumeId === 'auto' || resumePool(app, id).all.some((r) => r.id === x.resumeId);
+    return { ...x, profileId: id, resumeId: usable ? x.resumeId : 'auto' };
+  });
   const save = async (start) => {
     if (!c.roles.length) { app.toast('Add at least one job title', 'error'); return; }
     setSaving(true);
@@ -27,7 +33,7 @@ export function CampaignEditor({ initial, onClose }) {
       onClose();
     } catch (e) { app.toast(e.message, 'error'); } finally { setSaving(false); }
   };
-  const suggestions = (app.profile.desiredTitles || []).filter((t) => !c.roles.includes(t));
+  const suggestions = ((getProfile(app, c.profileId).values || {}).desiredTitles || []).filter((t) => !c.roles.includes(t));
   return (
     <Sheet open={open} onClose={onClose} tall title={c.id ? 'Edit campaign' : 'New campaign'}
       footer={<>
@@ -40,12 +46,17 @@ export function CampaignEditor({ initial, onClose }) {
         </Field>
         {suggestions.length > 0 && <div className="chips">{suggestions.slice(0, 4).map((t) => <button type="button" key={t} className="chip" onClick={() => up('roles')([...c.roles, t])}>+ {t}</button>)}</div>}
         <Field label="Campaign name"><input className="input" value={c.name} onChange={(e) => up('name')(e.target.value)} placeholder={c.roles[0] || 'My campaign'} data-testid="campaign-name" /></Field>
+        <Field label="Profile" help="Whose details, resumes and applications this campaign uses. Campaigns for different profiles can run side by side.">
+          <select className="select" value={c.profileId || 'main'} onChange={(e) => setProfile(e.target.value)} aria-label="Campaign profile" data-testid="campaign-profile">
+            {app.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+          </select>
+        </Field>
         <Field label="Locations" help="Up to 3 are searched. Leave empty for anywhere."><TagInput value={c.locations} onChange={(v) => up('locations')(v.slice(0, 3))} placeholder="Bengaluru, Remote…" label="Locations" /></Field>
         <div><span className="field-label">Work mode</span><Seg full value={c.remote} onChange={up('remote')} options={[{ value: 'any', label: 'Any' }, { value: 'remote', label: 'Remote' }, { value: 'onsite', label: 'On-site' }]} /></div>
-        <Field label="Resume for this campaign" help="Auto picks the best resume per job using role tags and skills.">
+        <Field label="Resume for this campaign" help="Auto picks the best resume per job using role tags and skills. Shows this profile's resumes and shared ones.">
           <select className="select" value={c.resumeId} onChange={(e) => up('resumeId')(e.target.value)} aria-label="Campaign resume">
             <option value="auto">✨ Auto-pick best match per job</option>
-            {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {resumePool(app, c.profileId).all.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </Field>
         <div className="row between" style={{ minHeight: 44, gap: 12 }}>
@@ -129,6 +140,7 @@ export function CampaignCard({ c, index = 0, onEdit }) {
               {c.remote && c.remote !== 'any' && <span className="badge">{c.remote}</span>}
               {c.runOn === 'desktop' && <span className="badge"><Monitor size={10} />PC only</span>}
               {c.runOn === 'phone' && <span className="badge"><Smartphone size={10} />phone only</span>}
+              {app.profiles.length > 1 && <span className="badge" data-testid="campaign-profile-badge">{getProfile(app, c.profileId).label}</span>}
             </div>
           </div>
           <Button size="sm" variant="ghost" icon={Pencil} aria-label={`Edit ${c.name}`} onClick={() => onEdit(c)} data-testid="campaign-edit" />

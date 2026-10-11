@@ -4,10 +4,10 @@ import { Inbox, Check, X, ExternalLink, Send, Zap, CircleAlert, MessageSquareTex
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Logo, ScoreRing, Empty, Seg, timeAgo, salary } from '../components/ui.jsx';
 import { JobSheet, QuickFillSheet } from '../components/jobs.jsx';
-import { startInAppApply } from '../components/apply.jsx';
+import { startInAppApply, UnansweredList } from '../components/apply.jsx';
 import { AUTO_ATS, patchApplication, sendToLaptop, openExternal } from '../lib/apply.js';
 import { canApplyInApp } from '../lib/bridge.js';
-import { useApplySessions, resolveSubmit } from '../lib/applyFlow.js';
+import { useApplySessions, resolveSubmit, openQuestions } from '../lib/applyFlow.js';
 
 const asJob = (a) => ({ ...a.job, id: a.jobId, match: a.match });
 
@@ -52,7 +52,7 @@ export default function Queue({ params }) {
     try {
       for (const id of list) {
         const a = app.applications.find((x) => x.id === id);
-        await sendToLaptop(app, asJob(a), { resumeId: a.resumeId || 'auto', mode });
+        await sendToLaptop(app, asJob(a), { resumeId: a.resumeId || 'auto', mode, profileId: a.profileId });
         await patchApplication(app, id, {}, { type: 'step', message: `Sent to your laptop (${mode === 'auto' ? 'autopilot' : 'fill, you submit'})` });
       }
       app.toast(`Sent ${list.length} to your laptop. They wait in its Review queue.`, 'success');
@@ -118,12 +118,14 @@ export default function Queue({ params }) {
         <section className="col" style={{ gap: 8 }}>
           <div className="section-title" style={{ margin: 0 }}><CircleAlert size={14} color="var(--amber)" />Needs you ({needs.length})</div>
           <AnimatePresence>
-            {needs.map((a) => (
+            {needs.map((a) => {
+              const openCount = openQuestions(app.qa, a.unanswered).length;
+              return (
               <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40 }} className="card pad col" style={{ gap: 10 }} data-testid="needs-row">
                 <div className="row" style={{ gap: 10 }}>
                   <Logo name={a.job.company} size="sm" />
                   <div className="grow"><div className="small ellipsis" style={{ fontWeight: 700 }}>{a.job.title} <span className="muted" style={{ fontWeight: 400 }}>· {a.job.company}</span></div>
-                    <div className="tiny muted ellipsis">{((a.events || []).slice(-1)[0] || {}).message || 'Review and submit'}{a.unanswered && a.unanswered.length ? ` · ${a.unanswered.length} unanswered` : ''}</div></div>
+                    <div className="tiny muted ellipsis">{((a.events || []).slice(-1)[0] || {}).message || 'Review and submit'}{openCount ? ` · ${openCount} unanswered question${openCount > 1 ? 's' : ''}` : ''}</div></div>
                   <Button size="sm" variant="ghost" icon={X} aria-label="Skip this job" onClick={() => skip([a.id])} />
                 </div>
                 <div className="grid g3" style={{ gap: 6 }}>
@@ -131,8 +133,10 @@ export default function Queue({ params }) {
                   <Button size="sm" icon={native ? RotateCw : MessageSquareText} onClick={() => (native ? apply([a.id]) : go('answers'))}>{native ? 'Retry' : 'Answers'}</Button>
                   <Button size="sm" variant="primary" icon={Check} onClick={() => markApplied(a)}>I sent it</Button>
                 </div>
+                <UnansweredList a={a} />
               </motion.div>
-            ))}
+              );
+            })}
           </AnimatePresence>
         </section>
       )}
@@ -190,7 +194,7 @@ export default function Queue({ params }) {
       )}
 
       <JobSheet job={open} onClose={() => setOpen(null)} />
-      <QuickFillSheet open={!!quick} job={quick && asJob(quick)} resumeId={(quick && quick.resumeId) || 'auto'} onClose={() => setQuick(null)} />
+      <QuickFillSheet open={!!quick} job={quick && asJob(quick)} resumeId={(quick && quick.resumeId) || 'auto'} profileId={quick && quick.profileId} onClose={() => setQuick(null)} />
     </div>
   );
 }

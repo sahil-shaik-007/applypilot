@@ -7,7 +7,7 @@ import {
 } from '../security.js';
 import { profileFromPayload } from '../google.js';
 
-export const userView = (u) => ({ id: u.id, email: u.email, name: u.name || '', picture: u.picture || '' });
+export const userView = (u) => ({ id: u.id, email: u.email, name: u.name || '', displayName: u.display_name || '', picture: u.picture || '' });
 
 const PLATFORMS = new Set(['ios', 'android']);
 
@@ -113,6 +113,15 @@ export function authRoutes(ctx) {
     repo.revokeAll(req.auth.user.id);
     if (req.auth.transport === 'cookie') clearSessionCookies(res);
     res.json({ ok: true });
+  });
+
+  // The name shown on the portal, chosen by the user (1-40 characters). Not the Google name or email.
+  r.post('/me/display-name', requireAuth(ctx, 'any'), (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {};
+    const name = cleanText(body.displayName, 40);
+    if (!name) throw new HttpError(400, 'Enter the name you want to see in your portal.');
+    repo.q.setDisplayName.run(name, req.auth.user.id);
+    res.json({ user: userView(repo.q.userById.get(req.auth.user.id)) });
   });
 
   r.get('/me', requireAuth(ctx, 'any'), (req, res) => {

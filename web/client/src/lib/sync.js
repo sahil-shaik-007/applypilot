@@ -4,7 +4,7 @@
 import { encryptJSON, decryptJSON, encryptBytes, decryptBytes, aadFor } from '@shared/vaultCrypto.js';
 import { api, ApiError } from './api.js';
 
-export const COLLECTIONS = ['profile', 'resumes', 'applications', 'qa', 'settings', 'outbox', 'savedJobs', 'campaigns', 'network', 'careerPages'];
+export const COLLECTIONS = ['profile', 'profiles', 'resumes', 'applications', 'qa', 'settings', 'outbox', 'savedJobs', 'campaigns', 'network', 'careerPages'];
 const ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
 const isPlainObject = (v) => v && typeof v === 'object' && !Array.isArray(v);

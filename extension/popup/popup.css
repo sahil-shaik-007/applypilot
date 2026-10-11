@@ -26,3 +26,26 @@ header { padding-bottom: 2px; }
 .ring.low .bar { stroke: var(--red); }
 footer { border-top: 1px solid var(--border); padding-top: 8px; }
 #embeddedList a { word-break: break-all; }
+
+/* check panel (autofill step 1): plain controls; theme.css styles every text input as a large code box */
+#fillCheck { display: flex; flex-direction: column; gap: 6px; }
+#fillCheck .sub { margin-top: 8px; }
+#fillCheck .note { margin: 0 0 4px; }
+#checkFill { margin: 0; }
+#checkFill li { word-break: break-word; }
+#checkFill li::before { content: '+ '; color: var(--green); }
+#checkCaptcha, #checkMsg { margin-top: 6px; }
+#checkNotes { margin-top: 4px; }
+#checkResume { margin-top: 4px; }
+.check-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; cursor: pointer; }
+.check-row input[type=checkbox] { margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+.check-label { font-size: 12px; color: var(--fg); word-break: break-word; }
+.check-label .req { color: var(--red); }
+.need { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+#fillCheck input.check-in, #fillCheck select.check-in {
+  font: 13px var(--font); letter-spacing: normal; text-align: left; width: 100%; box-sizing: border-box;
+  background: var(--bg-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 7px 9px; outline: none;
+}
+#fillCheck input.check-in:focus, #fillCheck select.check-in:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 241, .25); }
+#checkWho { margin-bottom: 2px; }

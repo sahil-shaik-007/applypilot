@@ -2,6 +2,7 @@
 import { newId } from '@shared/vaultCrypto.js';
 import { pickResume as sharedPickResume } from '@shared/campaignRules.js';
 import { safeId } from './sync.js';
+import { getProfile, pickResumeFor, snapshotOf, profileIdOf } from './profiles.js';
 
 export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'smartrecruiters', 'recruitee'];
 
@@ -43,16 +44,22 @@ export async function patchApplication(app, id, patch = {}, ev) {
   return next;
 }
 
-/** New tracker record (desktop createApplication shape). */
-export function newApplication(job, { status = 'queued', resume, match, campaign, message, source = 'web' } = {}) {
+/**
+ * New tracker record (desktop createApplication shape). `profile` is the profile {id, label, values} the
+ * application is for; it is stored as `profileId` plus a `profile` snapshot { label, values }.
+ */
+export function newApplication(job, { status = 'queued', resume, match, campaign, message, source = 'web', profile } = {}) {
   const now = new Date().toISOString();
   const m = match || job.match || null;
+  const pid = profile ? profile.id : profileIdOf(campaign);
   return {
     id: newId(),
     jobId: job.id,
     job: jobSnapshot(job),
     campaignId: campaign ? campaign.id : null,
     campaignName: campaign ? campaign.name : 'Phone',
+    profileId: pid,
+    ...(profile ? { profile: snapshotOf(profile) } : {}),
     resumeId: resume ? resume.id : null,
     resumeName: resume ? resume.name : null,
     score: m ? m.score : null,
@@ -67,16 +74,17 @@ export function newApplication(job, { status = 'queued', resume, match, campaign
 }
 
 /** Returns the tracker entry for a job, creating it (default 'saved') if missing. */
-export async function ensureApplication(app, job, { status = 'saved', resumeId, message } = {}) {
+export async function ensureApplication(app, job, { status = 'saved', resumeId, message, profileId } = {}) {
   const existing = findApplication(app, job);
   if (existing) return existing;
-  const rec = newApplication(job, { status, resume: pickResume(app.resumes, job, resumeId), message: message || (status === 'saved' ? 'Saved on phone' : undefined) });
+  const who = getProfile(app, profileId);
+  const rec = newApplication(job, { status, resume: pickResumeFor(app, job, resumeId, who.id), profile: who, message: message || (status === 'saved' ? 'Saved on phone' : undefined) });
   await app.put('applications', rec.id, rec);
   return rec;
 }
 
 /** Creates or updates the tracker entry for a job. */
-export async function upsertApplication(app, job, status, { resumeId, message } = {}) {
+export async function upsertApplication(app, job, status, { resumeId, message, profileId } = {}) {
   const now = new Date().toISOString();
   const existing = findApplication(app, job);
   if (existing) {
@@ -85,13 +93,16 @@ export async function upsertApplication(app, job, status, { resumeId, message } 
     await app.put('applications', existing.id, next);
     return next;
   }
-  const resume = pickResume(app.resumes, job, resumeId);
+  const who = getProfile(app, profileId);
+  const resume = pickResumeFor(app, job, resumeId, who.id);
   const rec = {
     id: newId(),
     jobId: job.id,
     job: jobSnapshot(job),
     campaignId: null,
     campaignName: 'Phone',
+    profileId: who.id,
+    profile: snapshotOf(who),
     resumeId: resume ? resume.id : null,
     resumeName: resume ? resume.name : null,
     score: job.match ? job.match.score : null,
@@ -128,19 +139,29 @@ export async function skipJob(app, job) {
   return upsertApplication(app, job, 'skipped', { message: 'Skipped in swipe triage' });
 }
 
-/** Queues a job for the desktop app (`outbox` collection). The desktop deletes it once picked up. */
-export async function sendToLaptop(app, job, { resumeId = 'auto', mode = 'review' } = {}) {
-  const resume = pickResume(app.resumes, job, resumeId);
+/**
+ * Queues a job for the desktop app (`outbox` collection). The desktop deletes it once picked up.
+ * Item fields: jobId, job, resumeId (chosen resume record id), profileId, profile {label, values} (snapshot of
+ * the profile to apply with), mode ('review' | 'auto'), createdAt, from. Without a profile the desktop uses profile/main.
+ */
+export async function sendToLaptop(app, job, { resumeId = 'auto', mode = 'review', profileId } = {}) {
+  const who = getProfile(app, profileId);
+  const resume = pickResumeFor(app, job, resumeId, who.id);
   const id = newId();
   const item = {
     jobId: job.id,
     job: { ...jobSnapshot(job), match: job.match || null },
     resumeId: resume ? resume.id : null,
+    profileId: who.id,
+    profile: snapshotOf(who),
     mode: mode === 'auto' ? 'auto' : 'review',
     createdAt: new Date().toISOString(),
     from: 'web',
   };
   await app.put('outbox', id, item);
+  // The tracker entry for this job follows the profile it was sent as.
+  const existing = findApplication(app, job);
+  if (existing && profileIdOf(existing) !== who.id) await patchApplication(app, existing.id, { profileId: who.id, profile: snapshotOf(who) }, `Sent as ${who.label}`).catch(() => {});
   return { id, ...item };
 }
 

@@ -526,7 +526,7 @@ async function answerBank() {
     assert(q && q.answer.startsWith('Yes'), 'answer not saved');
     await page.locator('.seg button', { hasText: /^All/ }).click(); await page.waitForTimeout(300);
     await shot('10-answer-bank');
-    await page.locator('.card', { hasText: 'on-call rotations' }).first().locator('button').last().click(); await page.waitForTimeout(600);
+    await page.locator('.card', { hasText: 'on-call rotations' }).first().locator('button:has(svg.lucide-trash-2)').first().click(); await page.waitForTimeout(600);
     q = (await call('qa:list')).find((x) => /on-call/.test(x.question));
     assert(!q, 'not deleted');
   });

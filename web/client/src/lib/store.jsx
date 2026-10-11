@@ -4,6 +4,7 @@ import { unlockVault } from '@shared/vaultCrypto.js';
 import { api, setUnauthorizedHandler } from './api.js';
 import { Sync } from './sync.js';
 import { setTestMode } from './bridge.js';
+import { allProfiles, DEFAULT_PROFILE_ID, DEFAULT_LABEL } from './profiles.js';
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -80,6 +81,8 @@ export function AppProvider({ children }) {
     try {
       const me = await api('/me');
       setUser(me.user);
+      // First time (or no name yet): ask what the user wants to see in the portal before anything else.
+      if (!me.user.displayName) { setPhase('name'); return me; }
       if (me.hasVault) {
         const v = await api('/vault');
         setVaultDoc(v);
@@ -151,10 +154,11 @@ export function AppProvider({ children }) {
   // ---------------- derived decrypted data
   const data = useMemo(() => {
     const s = syncRef.current;
-    if (!s) return { profile: {}, settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [], campaigns: [], networkMeta: null, careerPages: [] };
+    if (!s) return { profile: {}, profiles: [{ id: DEFAULT_PROFILE_ID, label: DEFAULT_LABEL, values: {}, isDefault: true }], settings: {}, resumes: [], applications: [], qa: [], outbox: [], savedJobs: [], campaigns: [], networkMeta: null, careerPages: [] };
     const byDate = (k) => (a, b) => String(b[k] || '').localeCompare(String(a[k] || ''));
     return {
-      profile: (s.get('profile', 'main') || {}).values || {},
+      profile: (s.get('profile', DEFAULT_PROFILE_ID) || {}).values || {},
+      profiles: allProfiles({ sync: s }),
       settings: s.get('settings', 'main') || {},
       resumes: s.list('resumes').sort(byDate('createdAt')),
       applications: s.list('applications').sort(byDate('updatedAt')),
@@ -168,6 +172,14 @@ export function AppProvider({ children }) {
   }, [rev]);
 
   const sync = syncRef.current;
+  /** Saves the details of one profile (default = profile/main). Keeps the profile's label. */
+  const saveProfileTo = async (id, values) => {
+    const s = syncRef.current;
+    if (!id || id === DEFAULT_PROFILE_ID) return s.put('profile', DEFAULT_PROFILE_ID, { ...(s.get('profile', DEFAULT_PROFILE_ID) || {}), values });
+    const cur = s.get('profiles', id);
+    if (!cur) throw new Error('Profile not found');
+    return s.put('profiles', id, { ...cur, values, updatedAt: new Date().toISOString() });
+  };
   const value = {
     phase, setPhase, config, user, setUser, vaultDoc, setVaultDoc, lockReason,
     toast, confirm, lock, logout, refreshMe, startSession, unlock, toLanding,
@@ -180,7 +192,8 @@ export function AppProvider({ children }) {
     },
     put: (c, id, d, o) => syncRef.current.put(c, id, d, o),
     remove: (c, id) => syncRef.current.remove(c, id),
-    async saveProfile(values) { return syncRef.current.put('profile', 'main', { values }); },
+    saveProfileTo,
+    saveProfile: (values) => saveProfileTo(DEFAULT_PROFILE_ID, values),
     async saveSettings(patch) {
       const cur = syncRef.current.get('settings', 'main') || {};
       return syncRef.current.put('settings', 'main', { ...cur, ...patch });

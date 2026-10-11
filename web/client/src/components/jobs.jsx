@@ -6,10 +6,12 @@ import {
 } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, Logo, ScoreRing, StatusBadge, Seg, timeAgo, salary, stagger, CopyRow, copyText, downloadFile, Markdown } from './ui.jsx';
-import { AUTO_ATS, saveJob, unsaveJob, sendToLaptop, skipJob, upsertApplication, pickResume, openExternal, findApplication } from '../lib/apply.js';
+import { AUTO_ATS, saveJob, unsaveJob, sendToLaptop, skipJob, upsertApplication, openExternal, findApplication } from '../lib/apply.js';
+import { allProfiles, getProfile, pickResumeFor, resumePool, profileIdForJob } from '../lib/profiles.js';
 import { safeId } from '../lib/sync.js';
 import { coverLetter, tailorResume, outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
 import { canApplyInApp, openUrl } from '../lib/bridge.js';
+import { ApplyCheck } from './applyCheck.jsx';
 import { allConnections, peopleAt, researchLinks } from '../lib/network.js';
 import { marketPay } from '../lib/insights.js';
 import { startInAppApply, TailoredCard } from './apply.jsx';
@@ -156,12 +158,14 @@ export function ResearchCard({ job, onClose }) {
   );
 }
 
-export function ResumeSelect({ value, onChange }) {
+/** Resume picker. With `profileId` it lists that profile's resumes and the shared ones. */
+export function ResumeSelect({ value, onChange, profileId }) {
   const app = useApp();
+  const list = profileId ? resumePool(app, profileId).all : app.resumes;
   return (
     <select className="select" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Resume">
       <option value="auto">✨ Auto-pick best match</option>
-      {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}{r.isDefault ? ' (default)' : ''}</option>)}
+      {list.map((r) => <option key={r.id} value={r.id}>{r.name}{r.isDefault ? ' (default)' : ''}</option>)}
     </select>
   );
 }
@@ -171,27 +175,27 @@ export function JobSheet({ job, onClose }) {
   const app = useApp();
   const [tab, setTab] = useState('details');
   const [resumeId, setResumeId] = useState('auto');
+  const [pick, setPick] = useState(null); // profile picked in the Apply tab; null = the job's profile
   const [mode, setMode] = useState('review');
   const [busy, setBusy] = useState(null);
   const [quick, setQuick] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [more, setMore] = useState(false);
   const saved = useSaved(job);
-  useEffect(() => { setTab('details'); setMore(false); }, [job && job.id]);
+  useEffect(() => { setTab('details'); setMore(false); setPick(null); }, [job && job.id]);
   const application = job ? findApplication(app, job) : null;
   const queued = job ? app.outbox.some((o) => o.jobId === job.id) : false;
   const canAuto = job && AUTO_ATS.includes(job.ats);
   const scam = isScam(job);
 
   const run = async (k, fn, ok) => { setBusy(k); try { await fn(); if (ok) app.toast(ok, 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } };
+  // Apply in app exists only in the phone app; a normal browser sends to the PC or opens the job page.
   const native = canApplyInApp();
+  // The person this application is for: picked in the Apply tab, else the job's campaign or the default profile.
+  const activePid = pick || (job ? profileIdForJob(app, job) : 'main');
   const applyHere = async () => {
-    if (native) {
-      setBusy('inapp');
-      try { await startInAppApply(app, { job, resumeId, mode }); } finally { setBusy(null); }
-      return;
-    }
-    openExternal(job.applyUrl || job.url);
-    setQuick(true);
+    setBusy('inapp');
+    try { await startInAppApply(app, { job, resumeId, mode, profileId: activePid }); } finally { setBusy(null); }
   };
 
   const desc = (job && job.description) || '';
@@ -215,9 +219,17 @@ export function JobSheet({ job, onClose }) {
         footer={job && (
           <div className="col" style={{ gap: 8, width: '100%' }}>
             {scam && <div className="tiny" style={{ color: 'var(--red)', textAlign: 'center' }}>Applying is disabled: this posting looks like a scam. Never pay a fee or share ID documents.</div>}
-            <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={native ? Zap : Smartphone} loading={busy === 'inapp'} onClick={applyHere} disabled={scam} data-testid="apply-here" block>{native ? 'Apply in app' : 'Apply on this phone'}</Button>
+            {native ? (
+              <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={Zap} loading={busy === 'inapp'} onClick={applyHere} disabled={scam} data-testid="apply-here" block>Apply in app</Button>
+            ) : (
+              <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={queued ? Check : Laptop} disabled={queued || scam} data-testid="send-laptop" onClick={() => setChecking(true)} block>{queued ? 'Queued for your PC' : 'Send to my PC'}</Button>
+            )}
             <div className="grid g2" style={{ gap: 8 }}>
-              <Button icon={queued ? Check : Laptop} loading={busy === 'send'} disabled={queued || scam} data-testid="send-laptop" onClick={() => run('send', () => sendToLaptop(app, job, { resumeId, mode }), mode === 'auto' ? 'Sent to your laptop. It applies on autopilot when the desktop app is next online.' : 'Sent to your laptop. It will be waiting in the Review queue there: one click fills it in.')}>{queued ? 'Queued' : 'Send to laptop'}</Button>
+              {native ? (
+                <Button icon={queued ? Check : Laptop} disabled={queued || scam} data-testid="send-laptop" onClick={() => setChecking(true)}>{queued ? 'Queued' : 'Send to my PC'}</Button>
+              ) : (
+                <Button icon={ExternalLink} onClick={() => openExternal(job.applyUrl || job.url)} data-testid="open-job-page">Open job page</Button>
+              )}
               <Button icon={saved ? BookmarkCheck : Bookmark} loading={busy === 'save'} data-testid="save-job" onClick={() => run('save', () => (saved ? unsaveJob(app, job) : saveJob(app, job)), saved ? 'Removed from saved' : 'Saved to Applications')}>{saved ? 'Saved' : 'Save'}</Button>
             </div>
           </div>
@@ -248,7 +260,12 @@ export function JobSheet({ job, onClose }) {
             {tab === 'apply' && (
               <div className="col" style={{ gap: 14 }}>
                 <div className="card pad col" style={{ gap: 14 }}>
-                  <div><span className="label">Resume</span><ResumeSelect value={resumeId} onChange={setResumeId} />
+                  <div><span className="label">Profile</span>
+                    <select className="select" value={activePid} onChange={(e) => { setPick(e.target.value); setResumeId('auto'); }} aria-label="Profile" data-testid="apply-profile">
+                      {allProfiles(app).map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+                    </select>
+                    <div className="tiny dim" style={{ marginTop: 4 }}>The person this application is for. Each profile has its own details and resumes.</div></div>
+                  <div><span className="label">Resume</span><ResumeSelect value={resumeId} onChange={setResumeId} profileId={activePid} />
                     {!app.resumes.length && <div className="small" style={{ color: 'var(--amber)', marginTop: 6 }}>Upload a resume first (More → Resumes).</div>}</div>
                   <div>
                     <span className="label">{native ? 'How to apply' : 'Apply mode'}</span>
@@ -256,13 +273,13 @@ export function JobSheet({ job, onClose }) {
                     <div className="small muted" style={{ marginTop: 8 }}>{mode === 'auto' ? (canAuto ? `Fills every field and submits after a ${app.settings.submitDelaySeconds ?? 30}s cancel window when every required answer is known; anything uncertain waits for you. Applies to "Apply in app" and "Send to laptop".` : 'This site doesn\'t allow automated submission, so ApplyPilot fills it and you press submit.') : 'The form opens filled in. You review it and press submit.'}</div>
                   </div>
                 </div>
-                <TailoredCard job={job} resumeId={resumeId} />
+                <TailoredCard job={job} resumeId={resumeId} profileId={activePid} />
                 <div className="card pad col" style={{ gap: 10 }}>
                   <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />Applying on your phone</div>
                   <div className="small muted">{native ? 'Apply in app opens the form inside ApplyPilot and fills it from your profile, answers and resume. Quick-fill gives one-tap copy for every field.' : 'We open the application in a new tab and give you one-tap copy for every field.'}</div>
                   {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} disabled={scam} onClick={applyHere} data-testid="apply-inapp">Apply in app</Button>}
                   <Button icon={Copy} disabled={scam} onClick={() => setQuick(true)} data-testid="open-quickfill">Open Quick-fill</Button>
-                  <Button icon={Check} loading={busy === 'applied'} disabled={application && application.status === 'applied'} onClick={() => run('applied', () => upsertApplication(app, job, 'applied', { resumeId }), 'Marked as applied')}>Mark as applied</Button>
+                  <Button icon={Check} loading={busy === 'applied'} disabled={application && application.status === 'applied'} onClick={() => run('applied', () => upsertApplication(app, job, 'applied', { resumeId, profileId: activePid }), 'Marked as applied')}>Mark as applied</Button>
                 </div>
                 {application && (
                   <div className="card pad">
@@ -276,24 +293,26 @@ export function JobSheet({ job, onClose }) {
                 )}
               </div>
             )}
-            {tab === 'ai' && <AiTools job={job} resumeId={resumeId} />}
+            {tab === 'ai' && <AiTools job={job} resumeId={resumeId} profileId={activePid} />}
           </div>
         )}
       </Sheet>
-      <QuickFillSheet open={quick} job={job} resumeId={resumeId} onClose={() => setQuick(false)} />
+      <QuickFillSheet open={quick} job={job} resumeId={resumeId} profileId={activePid} onClose={() => setQuick(false)} />
+      <ApplyCheck open={checking && !!job} job={job} resumeId={resumeId} mode={mode} profileId={activePid} onClose={() => setChecking(false)} />
     </>
   );
 }
 
-export function useAiArgs(resumeId, job) {
+export function useAiArgs(resumeId, job, profileId) {
   const app = useApp();
-  const resume = pickResume(app.resumes, job, resumeId);
-  return { apiKey: app.settings.anthropicKey, model: app.settings.aiModel || DEFAULT_MODEL, profile: app.profile, resumeText: resume ? resume.text : '' };
+  const who = getProfile(app, profileId);
+  const resume = pickResumeFor(app, job, resumeId, who.id);
+  return { apiKey: app.settings.anthropicKey, model: app.settings.aiModel || DEFAULT_MODEL, profile: who.values, resumeText: resume ? resume.text : '' };
 }
 
-export function AiTools({ job, resumeId }) {
+export function AiTools({ job, resumeId, profileId }) {
   const app = useApp();
-  const args = useAiArgs(resumeId, job);
+  const args = useAiArgs(resumeId, job, profileId);
   const [busy, setBusy] = useState(null);
   const [out, setOut] = useState({});
   useEffect(() => setOut({}), [job && job.id]);
@@ -364,14 +383,14 @@ function fillTemplate(tpl, job, p) {
 }
 
 /** Quick-fill: one-tap copy for every profile field, saved answers, resume file and cover letter. */
-export function QuickFillSheet({ open, job, resumeId, onClose }) {
+export function QuickFillSheet({ open, job, resumeId, profileId, onClose }) {
   const app = useApp();
-  const p = app.profile || {};
+  const p = getProfile(app, profileId).values || {};
   const [filter, setFilter] = useState('');
   const [letter, setLetter] = useState('');
   const [busy, setBusy] = useState(false);
-  const args = useAiArgs(resumeId, job);
-  const resume = job ? pickResume(app.resumes, job, resumeId) : null;
+  const args = useAiArgs(resumeId, job, profileId);
+  const resume = job ? pickResumeFor(app, job, resumeId, getProfile(app, profileId).id) : null;
   useEffect(() => { if (open) { setFilter(''); setLetter(''); } }, [open, job && job.id]);
   const onCopied = (ok, k) => app.toast(ok ? `${k} copied` : 'Copy failed. Long-press to copy instead.', ok ? 'success' : 'error');
   const name = [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ');
@@ -413,6 +432,12 @@ export function QuickFillSheet({ open, job, resumeId, onClose }) {
       <div className="col" style={{ gap: 16 }} data-testid="quickfill">
         <div className="search-wrap"><Search size={16} /><input className="input" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a field…" aria-label="Find a field" /></div>
         {empty && <div className="card pad small" style={{ borderColor: 'rgba(251,191,36,.35)' }}>Your profile is empty. <a href="#/profile" onClick={(e) => { e.preventDefault(); onClose(); go('profile'); }}>Fill it once</a> and every field shows up here.</div>}
+        {!f && job && (job.ats === 'workable' || /workable\.com/i.test(job.applyUrl || job.url || '')) && (
+          <div className="card pad small col" style={{ gap: 4, borderColor: 'rgba(251,191,36,.35)' }} data-testid="identity-check">
+            <b>Check the form shows your details</b>
+            <span className="muted">Workable can restore a saved draft from an earlier person in this browser. Your name and email on the form should read {name || 'your name'}{p.email ? ` · ${p.email}` : ''}. Change anything that differs, or open the form in a private window.</span>
+          </div>
+        )}
         {resume && !f && (
           <div className="card pad row" style={{ gap: 10 }}>
             <FileText size={18} className="dim" />
@@ -499,6 +524,7 @@ function SwipeCard({ job, onSwipe, onOpen, rightLabel }) {
 export function SwipeDeck({ jobs, onOpen, onDone }) {
   const app = useApp();
   const [rightAction, setRightAction] = useState('send'); // send | save
+  const [checkJob, setCheckJob] = useState(null); // job waiting for the confirmation sheet
   const [gone, setGone] = useState(() => new Set());
   const [last, setLast] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -512,6 +538,12 @@ export function SwipeDeck({ jobs, onOpen, onDone }) {
     if (dir === 'right' && isScam(job)) {
       app.toast("This posting looks like a scam, so it can't be saved or sent. Swipe left to skip it.", 'error');
       if (x) animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
+      return;
+    }
+    // Sending to the laptop always goes through the check sheet; the card waits until it is confirmed.
+    if (dir === 'right' && rightAction === 'send') {
+      if (x) animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
+      setCheckJob(job);
       return;
     }
     setBusy(true);
@@ -557,6 +589,7 @@ export function SwipeDeck({ jobs, onOpen, onDone }) {
             )}
         </AnimatePresence>
       </div>
+      <ApplyCheck open={!!checkJob} job={checkJob} mode="review" onClose={() => setCheckJob(null)} onSent={() => { const id = checkJob && checkJob.id; if (id) setGone((g) => new Set(g).add(id)); }} />
       <div className="row" style={{ justifyContent: 'center', gap: 14 }}>
         <Button variant="outline" icon={Undo2} aria-label="Undo" disabled={!last || busy} onClick={undo} />
         <Button variant="danger" icon={X} aria-label="Skip" disabled={!top || busy} onClick={() => act('left')} data-testid="swipe-skip" style={{ width: 60, height: 60, borderRadius: 999 }} />

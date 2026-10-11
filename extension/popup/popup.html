@@ -47,8 +47,8 @@
 
   <section id="formCard" class="card hidden">
     <div class="row"><div class="label grow">Application form</div><span id="formFields" class="pill"></span></div>
-    <button id="fillBtn" class="btn primary block">Autofill this form</button>
-    <p class="small muted note">Fills from your ApplyPilot profile and Answer bank. You review and click Submit. Never touches passwords or CAPTCHAs.</p>
+    <button id="fillBtn" class="btn primary block">Review and autofill</button>
+    <p class="small muted note">Shows what will be filled from your ApplyPilot profile before anything changes. You confirm, then review and click Submit. Never touches passwords or CAPTCHAs.</p>
     <div id="fillMsg" class="msg hidden"></div>
     <div id="needs" class="hidden">
       <div class="label">Needs you</div>
@@ -56,6 +56,33 @@
       <button id="learnBtn" class="btn block">Save answers I typed to ApplyPilot</button>
       <div id="learnMsg" class="msg hidden"></div>
     </div>
+  </section>
+
+  <section id="fillCheck" class="card hidden">
+    <div class="label">Check before filling</div>
+    <div id="checkWho" class="small"></div>
+    <div id="checkFillSec" class="hidden">
+      <div class="label sub">Will fill</div>
+      <ul id="checkFill" class="plain small"></ul>
+    </div>
+    <div id="checkDiffSec" class="hidden">
+      <div class="label sub">Page already has a different value</div>
+      <p class="small muted note">Ticked fields are replaced. Unticked ones stay as they are.</p>
+      <div id="checkDiff"></div>
+    </div>
+    <div id="checkNeedsSec" class="hidden">
+      <div class="label sub">Required, no value yet</div>
+      <p class="small muted note">Type an answer. It is saved to your ApplyPilot Answer bank and used in this fill.</p>
+      <div id="checkNeeds"></div>
+    </div>
+    <div id="checkResume" class="small"></div>
+    <div id="checkNotes" class="small muted"></div>
+    <div id="checkCaptcha" class="msg warn hidden"></div>
+    <div class="row actions">
+      <button id="confirmFill" class="btn primary grow">Fill this form</button>
+      <button id="cancelFill" class="btn">Cancel</button>
+    </div>
+    <div id="checkMsg" class="msg hidden"></div>
   </section>
 
   <section id="embedded" class="card hidden">

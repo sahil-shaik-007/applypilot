@@ -56,27 +56,79 @@ const flows = {
     if (!j || !j.title) throw new Error('No job found on this page.');
     return ApBridge.apCall('/jobs', { method: 'POST', body: { job: j, status: status || s.defaultStatus } });
   },
-  async autofill({ tabId }) {
+  // Step 1 of autofill: read the page and the profile snapshot for this job, and report what a fill would do.
+  // Changes nothing on the page and fetches no resume bytes.
+  async autofillPlan({ tabId }) {
     const s = await getSettings();
     const ex = await extract(tabId).catch(() => null);
     const job = ex && ex.job ? ex.job : {};
-    const qs = new URLSearchParams({ title: job.title || '', company: job.company || '' }).toString();
-    const data = await ApBridge.apCall(`/autofill-data?${qs}`);
-    const p = data.profile || {};
-    const coverLetterText = p.coverLetterTemplate ? fillTemplate(p.coverLetterTemplate, job, p) : null;
+    const data = await bridgeData(job);
+    await inject(tabId, ['content/shared.js', 'content/autofill.js']);
+    const plan = await run(tabId, (payload) => globalThis.__apPlan(payload), [fillPayload(data, job)]);
+    const app = data.application || null;
+    return {
+      profile: { name: [(data.profile || {}).firstName, (data.profile || {}).lastName].filter(Boolean).join(' ') },
+      job: { title: job.title || '', company: job.company || '', source: job.source || '' },
+      application: app ? { id: app.id, status: app.status || '', resumeName: app.resumeName || null } : null,
+      plan,
+      resume: resumeSummary(data, s, plan),
+      overwriteDefault: !!s.overwrite,
+      embeddedForms: ex ? ex.embeddedForms : [],
+    };
+  },
+  // Step 2, only after the user confirmed the check panel: typed values go to the Answer bank, the page is filled
+  // (replacing only the fields the user ticked), then the resume is attached if the user kept that ticked.
+  async autofillApply({ tabId, overwriteKeys = [], manual = [], attachResume = true }) {
+    const s = await getSettings();
+    const ex = await extract(tabId).catch(() => null);
+    const job = ex && ex.job ? ex.job : {};
+    const data = await bridgeData(job);
+
+    const typed = {};
+    const toSave = [];
+    for (const m of (Array.isArray(manual) ? manual : []).slice(0, 50)) {
+      const value = m && m.value != null ? String(m.value).trim().slice(0, 5000) : '';
+      if (!m || !m.key || !value) continue;
+      typed[String(m.key)] = value;
+      const question = String(m.question || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (question.length >= 2) toSave.push({ question, answer: value, options: Array.isArray(m.options) ? m.options.slice(0, 50).map((x) => String(x).slice(0, 200)) : [] });
+    }
+    // Typed answers are saved back through the bridge (its /answers route). They are used for this fill either way.
+    let savedAnswers = { added: 0, updated: 0, error: null };
+    if (toSave.length) {
+      try { const r = await ApBridge.apCall('/answers', { method: 'POST', body: { items: toSave } }); savedAnswers = { added: r.added || 0, updated: r.updated || 0, error: null }; }
+      catch (e) { savedAnswers = { added: 0, updated: 0, error: friendly(e) }; }
+    }
+
     await inject(tabId, ['content/shared.js', 'content/autofill.js']);
     const result = await run(tabId, (payload) => globalThis.__apAutofill(payload), [{
-      profile: p, answers: data.answers, job: { title: job.title, company: job.company, location: job.location }, coverLetterText,
-      options: { highlight: s.highlight, learn: s.learn, overwrite: s.overwrite },
+      ...fillPayload(data, job),
+      options: { highlight: s.highlight, learn: s.learn },
+      overwriteKeys: (Array.isArray(overwriteKeys) ? overwriteKeys : []).map(String).slice(0, 500),
+      manual: typed,
     }]);
+    result.savedAnswers = savedAnswers;
+
+    // Resume: bytes are requested only now, only for the chosen resume, and only if the page has an empty resume upload.
     result.resume = null;
+    const chosen = chosenResume(data);
     const needsResume = (result.fileFields || []).some((f) => f.kind === 'resume' && !f.hasFile);
-    if (needsResume && s.attachResume && (data.resumes || []).length) {
-      // Resume bytes are requested only now, only for this tab, and only because a resume upload field is present.
-      const withFile = await ApBridge.apCall(`/autofill-data?${qs}&resume=${encodeURIComponent(data.suggestedResumeId || 'auto')}`);
-      if (withFile.resumeFile) result.resume = await run(tabId, (f) => globalThis.__apAttachResume(f), [withFile.resumeFile]);
+    if (needsResume && chosen) {
+      if (!s.attachResume) result.resume = { attached: 0, fileName: chosen.fileName, reason: 'attaching is off in options' };
+      else if (!attachResume) result.resume = { attached: 0, fileName: chosen.fileName, reason: 'you left it unticked' };
+      else {
+        try {
+          const withFile = await bridgeData(job, { resume: chosen.id });
+          if (withFile.resumeFile) {
+            result.resume = await run(tabId, (f) => globalThis.__apAttachResume(f), [withFile.resumeFile]);
+          } else result.resume = { attached: 0, fileName: chosen.fileName, reason: 'ApplyPilot sent no file' };
+        } catch (e) {
+          result.resume = { attached: 0, fileName: chosen.fileName, reason: friendly(e) };
+        }
+        if (!result.resume.attached && !result.resume.reason) result.resume.reason = 'the upload field did not accept the file';
+      }
     } else if (needsResume) {
-      result.resume = { attached: 0, reason: (data.resumes || []).length ? 'Resume attaching is off in options' : 'No resume in ApplyPilot yet' };
+      result.resume = { attached: 0, fileName: null, reason: 'No resume in ApplyPilot yet' };
     }
     if (result.resume && result.resume.attached) result.filled += result.resume.attached;
     result.embeddedForms = ex ? ex.embeddedForms : [];
@@ -98,6 +150,42 @@ function fillTemplate(tpl, job, p) {
     company: job.company, title: job.title, firstName: p.firstName, lastName: p.lastName,
     skills: (p.skills || []).slice(0, 5).join(', '), years: p.totalYearsExperience,
   }[k] ?? m));
+}
+
+// The bridge request for this job: the profile snapshot, the Answer bank, the resume list and the tracked
+// application for this job (if any). Only job details go in the query string. resume=<id> also asks for that
+// resume's bytes, so no file leaves the desktop app unless the autofill step asks for it.
+function bridgeData(job, extra = {}) {
+  const qs = new URLSearchParams({ title: job.title || '', company: job.company || '', url: job.url || '' });
+  if (extra.resume) qs.set('resume', extra.resume);
+  return ApBridge.apCall(`/autofill-data?${qs.toString()}`);
+}
+// Payload for the content script (the same for the read-only plan and for the fill).
+function fillPayload(data, job) {
+  const p = data.profile || {};
+  return {
+    profile: p,
+    answers: data.answers || [],
+    job: { title: job.title || '', company: job.company || '', location: job.location || '' },
+    coverLetterText: p.coverLetterTemplate ? fillTemplate(p.coverLetterTemplate, job, p) : null,
+  };
+}
+// The resume to attach: the one the tracked application uses, else the suggested one, else the first.
+function chosenResume(data) {
+  const list = data.resumes || [];
+  const id = (data.application && data.application.resumeId) || data.suggestedResumeId || null;
+  return list.find((r) => r.id === id) || list[0] || null;
+}
+// What the check panel shows about the resume, decided before any file is requested.
+function resumeSummary(data, s, plan) {
+  const r = chosenResume(data);
+  const target = (plan.fileFields || []).find((f) => f.kind === 'resume') || null;
+  const reason = !r ? 'No resume in ApplyPilot yet'
+    : !target ? 'This page has no resume upload'
+      : target.hasFile ? 'The resume upload already has a file'
+        : !s.attachResume ? 'Attaching is off in options'
+          : null;
+  return { fileName: r ? (r.fileName || r.name || '') : null, fieldLabel: target ? (target.question || 'resume upload') : null, attachable: !reason, reason };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -138,7 +226,8 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       const r = await flows.save({ tabId });
       say(r.duplicate ? `ApplyPilot: already in your tracker (${r.status}).` : `ApplyPilot: saved · ${r.match ? r.match.score : '?'}% match${r.eligibility && !r.eligibility.ok ? ` · ${r.eligibility.blockers[0]}` : ''}`, r.eligibility && !r.eligibility.ok);
     } else if (command === 'autofill') {
-      await flows.autofill({ tabId }); // the content script shows its own summary
+      // A shortcut never fills on its own: it opens the toolbar popup, which shows what will be filled and waits.
+      try { await chrome.action.openPopup(); } catch { say('ApplyPilot: click the toolbar icon to review and fill this form. Nothing is filled until you confirm.'); }
     }
   } catch (e) { say(`ApplyPilot: ${friendly(e)}`, true); }
 });

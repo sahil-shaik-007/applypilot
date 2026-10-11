@@ -1,10 +1,10 @@
 // Live "Apply in app" progress + cancel window, tailored-resume PDF preview, campaign scheduler.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Hand, Send, Check, CircleAlert, Loader2, FileText, Share2, ExternalLink, Trash2, RefreshCw, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Zap, Hand, Send, Check, CircleAlert, Loader2, FileText, Share2, ExternalLink, Trash2, RefreshCw, ShieldCheck, Sparkles, X, Pencil, MessageSquareText } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, timeAgo } from './ui.jsx';
-import { useApplySessions, resolveSubmit, dismissSession, cancelSession, applyInApp, applyJobInApp } from '../lib/applyFlow.js';
+import { useApplySessions, resolveSubmit, dismissSession, cancelSession, applyInApp, applyJobInApp, openQuestions, saveBankAnswer, clearOpenQuestion } from '../lib/applyFlow.js';
 import { previewPages, generateTailored, deleteTailored } from '../lib/tailored.js';
 import { saveBytes, nat } from '../lib/bridge.js';
 import { tick, resetRuntime, campaignWatchlist } from '../lib/campaigns.js';
@@ -99,11 +99,71 @@ export function ApplyHost() {
 }
 
 /**
+ * The open questions of one application (Queue "Needs you" card and the tracker sheet). Every row can be
+ * answered (saved to the answer bank), edited, or cleared; the count shown by the caller is the same list.
+ * Returns null when nothing is open.
+ */
+export function UnansweredList({ a }) {
+  const app = useApp();
+  const items = useMemo(() => openQuestions(app.qa, a.unanswered), [app.qa, a.unanswered]);
+  const [editKey, setEditKey] = useState(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(null);
+  if (!items.length) return null;
+  const start = (it) => { setEditKey(it.key); setText(it.answerRec ? it.answerRec.answer : ''); };
+  const save = async (it) => {
+    setBusy(it.key);
+    try { await saveBankAnswer(app, it, text); setEditKey(null); app.toast('Saved to your answer bank', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); }
+  };
+  const clear = async (it) => {
+    setBusy(it.key);
+    try { await clearOpenQuestion(app, a.id, it.key); if (editKey === it.key) setEditKey(null); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); }
+  };
+  const removeFromBank = async (it) => {
+    if (!it.answerRec) return;
+    if (!(await app.confirm({ title: 'Delete this answer?', message: `"${it.answerRec.question}" is removed from your answer bank on every device.` }))) return;
+    try { await app.remove('qa', it.answerRec.id); setEditKey(null); app.toast('Answer deleted', 'success'); } catch (e) { app.toast(e.message, 'error'); }
+  };
+  return (
+    <div className="col" style={{ gap: 4 }} data-testid="open-questions">
+      <div className="section-title" style={{ margin: 0 }}>Questions for this job ({items.length})</div>
+      {items.map((it) => {
+        const editing = editKey === it.key;
+        return (
+          <div key={it.key} className="col" style={{ gap: 6, padding: '8px 0', borderTop: '1px solid var(--border)' }} data-testid="open-question">
+            <div className="row between" style={{ alignItems: 'flex-start', gap: 8 }}>
+              <div className="small break grow" style={{ fontWeight: 600 }}>{it.question}{it.required ? ' *' : ''}</div>
+              <span className={`badge ${it.answerRec ? 'green' : 'amber'}`}>{it.answerRec ? 'Answered' : 'Needs answer'}</span>
+            </div>
+            {!editing && it.answerRec && <div className="tiny muted prewrap">{it.answerRec.answer}</div>}
+            {editing ? (
+              <div className="col" style={{ gap: 6 }}>
+                <textarea className="textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Your answer. It is saved to your answer bank." aria-label="Answer" data-testid="open-question-answer" />
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  <Button size="sm" variant="primary" icon={Check} loading={busy === it.key} disabled={!text.trim()} onClick={() => save(it)} data-testid="open-question-save">Save to answer bank</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditKey(null)}>Cancel</Button>
+                  {it.answerRec && <Button size="sm" variant="ghost" icon={Trash2} onClick={() => removeFromBank(it)} data-testid="open-question-delete">Delete answer</Button>}
+                </div>
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <Button size="sm" icon={it.answerRec ? Pencil : MessageSquareText} onClick={() => start(it)} data-testid="open-question-edit">{it.answerRec ? 'Edit' : 'Answer'}</Button>
+                <Button size="sm" variant="ghost" icon={X} loading={busy === it.key} onClick={() => clear(it)} data-testid="open-question-clear">Clear</Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Starts an in-app application with the eligibility confirm (blockers) handled.
  * Pass either `applicationId` or `job` (+ resumeId). Returns the result or undefined.
  */
-export async function startInAppApply(app, { applicationId, job, resumeId, mode }) {
-  const run = (force) => (applicationId ? applyInApp(app, applicationId, { mode, force }) : applyJobInApp(app, job, { resumeId, mode, force }));
+export async function startInAppApply(app, { applicationId, job, resumeId, mode, profileId }) {
+  const run = (force) => (applicationId ? applyInApp(app, applicationId, { mode, force }) : applyJobInApp(app, job, { resumeId, mode, force, profileId }));
   try { return await run(false); } catch (e) {
     if (e.code === 'ineligible') {
       const ok = await app.confirm({ title: 'Apply anyway?', message: `${e.reasons.join(' · ')}. ApplyPilot can still fill this application if you're sure.`, confirmLabel: 'Apply anyway', danger: false });
@@ -176,14 +236,14 @@ export function TailoredPdfSheet({ applicationId, onClose }) {
 }
 
 /** Card + button to create/open a tailored PDF for a job or application. */
-export function TailoredCard({ job, resumeId, applicationId }) {
+export function TailoredCard({ job, resumeId, applicationId, profileId }) {
   const app = useApp();
   const a = applicationId ? getApplication(app, applicationId) : app.applications.find((x) => x.jobId === job.id);
   const [busy, setBusy] = useState('');
   const [open, setOpen] = useState(null);
   const make = async () => {
     setBusy('Starting…');
-    try { const r = await generateTailored(app, { job, resumeId: resumeId || 'auto', applicationId: a && a.id, onStep: setBusy }); setOpen(r.application.id); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(''); }
+    try { const r = await generateTailored(app, { job, resumeId: resumeId || 'auto', applicationId: a && a.id, profileId, onStep: setBusy }); setOpen(r.application.id); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(''); }
   };
   return (
     <div className="card pad col" style={{ gap: 10 }} data-testid="tailored-card">

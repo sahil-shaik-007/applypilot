@@ -6,27 +6,36 @@ import { useApp } from '../lib/store.jsx';
 import { Button, Empty, TagInput, Sheet, timeAgo, downloadFile } from '../components/ui.jsx';
 import { ACCEPT, MAX_BYTES, extOf, extractResume, prettySkills } from '../lib/resumeParse.js';
 import { sha256Hex } from '../lib/sync.js';
+import { setResumeProfile, resumeGroup } from '../lib/profiles.js';
 
 const MIME = { '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.txt': 'text/plain', '.md': 'text/markdown' };
 const kb = (n) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const profileName = (app, id) => { const p = app.profiles.find((x) => x.id === id); return p ? p.label : 'a removed profile'; };
 
 function ResumeCard({ r, onView }) {
   const app = useApp();
+  // Profile badges and pickers only appear once there is more than one profile (or the resume has one).
+  const showProfiles = app.profiles.length > 1 || !!r.profileId;
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(r.name);
   const save = async (patch, msg) => { try { await app.put('resumes', r.id, { ...r, ...patch }); if (msg) app.toast(msg, 'success'); } catch (e) { app.toast(e.message, 'error'); } };
+  // "Default" is per group: the default of one profile, and the default of the shared resumes.
   const makeDefault = async () => {
     try {
-      for (const o of app.resumes) if (o.isDefault && o.id !== r.id) await app.put('resumes', o.id, { ...o, isDefault: false });
-      await save({ isDefault: true }, `"${r.name}" is now your default resume`);
+      for (const o of app.resumes) if (o.isDefault && o.id !== r.id && resumeGroup(o) === resumeGroup(r)) await app.put('resumes', o.id, { ...o, isDefault: false });
+      await save({ isDefault: true }, `"${r.name}" is now the default resume${r.profileId ? ` for ${profileName(app, r.profileId)}` : ''}`);
     } catch (e) { app.toast(e.message, 'error'); }
+  };
+  const moveTo = async (pid) => {
+    try { await setResumeProfile(app, r, pid || null); app.toast(pid ? `"${r.name}" belongs to ${profileName(app, pid)}` : `"${r.name}" is shared with every profile`, 'success'); }
+    catch (e) { app.toast(e.message, 'error'); }
   };
   const del = async () => {
     if (!(await app.confirm({ title: 'Delete resume?', message: `"${r.name}" and its encrypted file will be deleted from every device.` }))) return;
     try {
       if (r.blobId) await app.sync.deleteBlob(r.blobId);
       await app.remove('resumes', r.id);
-      if (r.isDefault) { const next = app.resumes.find((x) => x.id !== r.id); if (next) await app.put('resumes', next.id, { ...next, isDefault: true }); }
+      if (r.isDefault) { const next = app.resumes.find((x) => x.id !== r.id && resumeGroup(x) === resumeGroup(r)); if (next) await app.put('resumes', next.id, { ...next, isDefault: true }); }
       app.toast('Resume deleted', 'success');
     } catch (e) { app.toast(e.message, 'error'); }
   };
@@ -47,7 +56,7 @@ function ResumeCard({ r, onView }) {
               </form>
             ) : (
               <>
-                <div className="row" style={{ gap: 6 }}><span style={{ fontWeight: 700 }} className="ellipsis" data-testid="resume-name">{r.name}</span>{r.isDefault && <span className="badge accent"><Star size={10} />default</span>}</div>
+                <div className="row wrap" style={{ gap: 6 }}><span style={{ fontWeight: 700 }} className="ellipsis" data-testid="resume-name">{r.name}</span>{r.isDefault && <span className="badge accent"><Star size={10} />default</span>}{showProfiles && <span className="badge" data-testid="resume-profile">{r.profileId ? profileName(app, r.profileId) : 'Shared'}</span>}</div>
                 <div className="tiny dim ellipsis">{r.fileName} · {kb(r.size || 0)} · {timeAgo(r.createdAt)}</div>
               </>
             )}
@@ -58,6 +67,14 @@ function ResumeCard({ r, onView }) {
         <div>
           <span className="label">Use for roles</span>
           <TagInput value={r.roles || []} onChange={(roles) => save({ roles })} placeholder="e.g. Data Analyst, BI" label="Roles for this resume" />
+        </div>
+        <div>
+          <span className="label">Belongs to</span>
+          <select className="select" value={r.profileId || ''} onChange={(e) => moveTo(e.target.value)} aria-label="Resume belongs to" data-testid="resume-profile-select">
+            <option value="">Shared with every profile</option>
+            {app.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+            {r.profileId && !app.profiles.some((p) => p.id === r.profileId) && <option value={r.profileId}>Removed profile</option>}
+          </select>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
           {!r.isDefault && <Button size="sm" icon={Star} onClick={makeDefault}>Make default</Button>}
@@ -77,6 +94,7 @@ export default function Resumes() {
   const [busy, setBusy] = useState('');
   const [over, setOver] = useState(false);
   const [view, setView] = useState(null);
+  const [forProfile, setForProfile] = useState(''); // profile for new uploads; '' = shared
 
   const upload = async (files) => {
     for (const file of [...files]) {
@@ -96,7 +114,7 @@ export default function Resumes() {
         const id = newId();
         const rec = {
           id, name: file.name.replace(/\.[^.]+$/, ''), fileName: file.name, ext, size: bytes.length, hash,
-          text, skills, roles: [], isDefault: !app.resumes.length, blobId, parseError, createdAt: new Date().toISOString(),
+          text, skills, roles: [], isDefault: !app.resumes.some((x) => resumeGroup(x) === (forProfile || 'shared')), profileId: forProfile || null, blobId, parseError, createdAt: new Date().toISOString(),
         };
         try { await app.put('resumes', id, rec); } catch (e) { await app.sync.deleteBlob(blobId).catch(() => {}); throw e; }
         app.toast(parseError ? `Uploaded "${rec.name}", but its text couldn't be read.` : `Uploaded "${rec.name}" · ${skills.length} skills found`, parseError ? 'error' : 'success');
@@ -107,6 +125,15 @@ export default function Resumes() {
 
   return (
     <div className="col" style={{ gap: 14 }}>
+      {app.profiles.length > 1 && (
+        <div className="col" style={{ gap: 6 }}>
+          <span className="label">New uploads belong to</span>
+          <select className="select" value={forProfile} onChange={(e) => setForProfile(e.target.value)} aria-label="Profile for new resumes" data-testid="upload-profile">
+            <option value="">Shared with every profile</option>
+            {app.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+          </select>
+        </div>
+      )}
       <div className={`dropzone card pad ${over ? 'over' : ''}`} style={{ borderStyle: 'dashed', textAlign: 'center', cursor: 'pointer', padding: 24 }}
         onClick={() => !busy && input.current.click()} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files); }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && input.current.click()}>

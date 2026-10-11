@@ -390,6 +390,16 @@ function registerIpc() {
   handle('applications:submitNow', (id) => manager.resolvePendingSubmit(id, true));
   handle('applications:openScreenshot', (id) => { const a = store.applications.get().items.find((x) => x.id === id); if (a && a.screenshotPath) shell.openPath(a.screenshotPath); });
 
+  // Review queue: dismiss one open question from one application. Any answer saved for it stays in the Answer bank.
+  // Matches on the same normalised text the Review queue card uses to list the questions.
+  const normQuestion = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  handle('applications:dismissQuestion', (id, question) => {
+    const a = store.applications.get().items.find((x) => x.id === id);
+    if (!a) throw new Error('Application not found');
+    const key = normQuestion(question);
+    return manager.patchApp(id, { unanswered: (a.unanswered || []).filter((u) => normQuestion(u && u.question) !== key) });
+  });
+
   // Q&A memory
   handle('qa:save', (item) => {
     store.qa.update((d) => {
@@ -682,7 +692,13 @@ ${p.linkedin}` : ''}`;
   handle('browser:check', async () => { const e = getEngine(); return e && e.isAvailable ? e.isAvailable() : { ok: false, error: 'Engine not available' }; });
   handle('browser:open', async (url) => {
     const e = getEngine();
-    if (e && e.openUrl) return e.openUrl(url);
+    if (e && e.openUrl) {
+      // Application pages are opened with the user's own profile and resume (never a saved browser draft).
+      const job = [...Object.values(store.jobs.get().items || {}), ...store.applications.get().items.map((a) => a.job)].find((j) => j && (j.applyUrl || j.url) === url) || { applyUrl: url, url };
+      const r = await e.openUrl(url, { job, profile: store.profile.get().values || {}, resume: resumeLib.pickResume(store, { job }) });
+      if (r && r.warnings && r.warnings.length) notify('Check your application details', r.warnings[0]);
+      return true;
+    }
     return shell.openExternal(url);
   });
   handle('shell:open', (url) => shell.openExternal(url));

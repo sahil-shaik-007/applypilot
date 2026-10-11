@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { SquareKanban, ExternalLink, Trash2, Laptop, Search, ChevronDown, Undo2, Upload, Download, FileText, Bell, Mail, GraduationCap, Zap, MessageSquareText, MoreHorizontal, Eraser, Copy } from 'lucide-react';
+import { SquareKanban, ExternalLink, Trash2, Laptop, Search, ChevronDown, Undo2, Upload, Download, FileText, Bell, Mail, GraduationCap, Zap, MoreHorizontal, Eraser, Copy } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS, stagger, copyText } from '../components/ui.jsx';
-import { openExternal, sendToLaptop, pickResume } from '../lib/apply.js';
+import { openExternal, sendToLaptop } from '../lib/apply.js';
+import { getProfile, pickResumeFor } from '../lib/profiles.js';
 import { ResumeSelect } from '../components/jobs.jsx';
-import { TailoredCard, startInAppApply } from '../components/apply.jsx';
+import { TailoredCard, startInAppApply, UnansweredList } from '../components/apply.jsx';
+import { openQuestions } from '../lib/applyFlow.js';
 import { canApplyInApp } from '../lib/bridge.js';
 import { outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
 import { importTracker, exportWorkLog, exportTrackerCsv, readCsvFile } from '../lib/trackerIo.js';
@@ -29,9 +31,9 @@ function AppSheet({ a, onClose }) {
   useEffect(() => { setNotes(a ? a.notes || '' : ''); setAi({}); }, [a && a.id]); // eslint-disable-line
   const native = canApplyInApp();
   const runAi = async (k, fn, extra = {}) => {
-    const resume = pickResume(app.resumes, a.job, a.resumeId || 'auto');
+    const resume = pickResumeFor(app, a.job, a.resumeId || 'auto', a.profileId);
     setBusy(k);
-    try { const r = await fn({ apiKey: app.settings.anthropicKey, model: app.settings.aiModel || DEFAULT_MODEL, profile: app.profile, resumeText: resume ? resume.text : '', job: { ...a.job, id: a.jobId }, ...extra }); setAi((o) => ({ ...o, [k]: r })); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(null); }
+    try { const r = await fn({ apiKey: app.settings.anthropicKey, model: app.settings.aiModel || DEFAULT_MODEL, profile: getProfile(app, a.profileId).values, resumeText: resume ? resume.text : '', job: { ...a.job, id: a.jobId }, ...extra }); setAi((o) => ({ ...o, [k]: r })); } catch (e) { app.toast(aiError(e), 'error'); } finally { setBusy(null); }
   };
   const days = a && a.appliedAt ? Math.max(1, Math.round((Date.now() - new Date(a.appliedAt)) / 86400000)) : 7;
   const update = async (patch, msg, ev) => {
@@ -73,7 +75,7 @@ function AppSheet({ a, onClose }) {
           {['saved', 'queued', 'failed', 'awaiting-you'].includes(a.status) && (
             <div className={native ? 'grid g2' : 'col'} style={{ gap: 8 }}>
               {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} onClick={async () => { setBusy('inapp'); try { await startInAppApply(app, { applicationId: a.id }); } finally { setBusy(null); } }} data-testid="app-apply-inapp">{a.status === 'awaiting-you' || a.status === 'failed' ? 'Retry in app' : 'Apply in app'}</Button>}
-              <Button icon={Laptop} loading={busy === 'send'} onClick={async () => { setBusy('send'); try { await sendToLaptop(app, { ...a.job, id: a.jobId, match: a.match }, { resumeId: a.resumeId || 'auto' }); app.toast('Sent to your laptop', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } }}>Send to laptop</Button>
+              <Button icon={Laptop} loading={busy === 'send'} onClick={async () => { setBusy('send'); try { await sendToLaptop(app, { ...a.job, id: a.jobId, match: a.match }, { resumeId: a.resumeId || 'auto', profileId: a.profileId }); app.toast('Sent to your laptop', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } }}>Send to laptop</Button>
             </div>
           )}
           <div className="grid g2">
@@ -82,11 +84,7 @@ function AppSheet({ a, onClose }) {
             <label className="field"><span className="label">Interview</span>
               <input type="datetime-local" className="input" value={(a.interviewAt || '').slice(0, 16)} onChange={(e) => update({ interviewAt: e.target.value || null }, 'Interview date saved')} /></label>
           </div>
-          {a.unanswered && a.unanswered.length > 0 && (
-            <div className="card pad"><div className="row between"><div className="section-title" style={{ margin: 0 }}>Unanswered questions</div><Button size="sm" variant="ghost" icon={MessageSquareText} onClick={() => { onClose(); go('answers'); }}>Answer</Button></div>
-              <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>{a.unanswered.map((q, i) => <li key={i}>{typeof q === 'string' ? q : q.question}{q.required ? ' *' : ''}</li>)}</ul>
-            </div>
-          )}
+          {openQuestions(app.qa, a.unanswered).length > 0 && <div className="card pad"><UnansweredList a={a} /></div>}
           <TailoredCard job={{ ...a.job, id: a.jobId }} resumeId={a.resumeId || 'auto'} applicationId={a.id} />
           {a.coverLetter && <div className="card pad"><div className="row between"><div className="section-title" style={{ margin: 0 }}>Cover letter</div><Button size="sm" variant="ghost" icon={Copy} aria-label="Copy cover letter" onClick={async () => { await copyText(a.coverLetter); app.toast('Copied', 'success'); }} /></div><div className="small prewrap" style={{ marginTop: 6 }}>{a.coverLetter}</div></div>}
           {['applied', 'interview'].includes(a.status) && (

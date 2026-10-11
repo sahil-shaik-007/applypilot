@@ -2,11 +2,31 @@ import React, { useEffect, useState } from 'react';
 import { Monitor, Link2, Trash2, KeyRound, Lock, Download, LogOut, ShieldAlert, RefreshCw, Copy, Laptop, UserX } from 'lucide-react';
 import { rewrapVault } from '@shared/vaultCrypto.js';
 import { useApp } from '../lib/store.jsx';
-import { api } from '../lib/api.js';
+import { api, post } from '../lib/api.js';
 import { Button, Sheet, Field, timeAgo, copyText, downloadFile } from '../components/ui.jsx';
 import { useDevices } from './Home.jsx';
 import { NewPassphraseFields, RecoveryKeyPanel, passphraseStrength } from './Vault.jsx';
 import { ApplyingCard, CareerPagesCard } from '../components/settingsCards.jsx';
+
+// The name shown in the portal. Editable here at any time (it is not the Google or sign-in email).
+function PortalName() {
+  const app = useApp();
+  const [name, setName] = useState((app.user && app.user.displayName) || '');
+  const [busy, setBusy] = useState(false);
+  const clean = name.trim().replace(/\s+/g, ' ');
+  const save = async (e) => {
+    e && e.preventDefault();
+    if (!clean) return app.toast('Enter the name you want to see in your portal.', 'error');
+    setBusy(true);
+    try { const r = await post('/me/display-name', { displayName: clean }); app.setUser(r.user); app.toast('Portal name saved', 'success'); } catch {} finally { setBusy(false); }
+  };
+  return (
+    <form className="row" style={{ gap: 8 }} onSubmit={save}>
+      <input className="input grow" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} aria-label="Portal name" placeholder="Your name" />
+      <Button size="sm" type="submit" loading={busy} disabled={!clean || clean === ((app.user && app.user.displayName) || '')}>Save name</Button>
+    </form>
+  );
+}
 
 function LinkCodeSheet({ code, onClose, onExpire }) {
   const app = useApp();
@@ -154,7 +174,8 @@ export default function Settings() {
 
       <div className="card pad col" style={{ gap: 10 }}>
         <div className="section-title" style={{ margin: 0 }}><ShieldAlert size={14} />Account</div>
-        <div className="small muted ellipsis">{app.user && app.user.email}</div>
+        <PortalName />
+        <div className="small muted ellipsis">Signed in as {app.user && app.user.email}</div>
         <Button icon={LogOut} onClick={() => app.logout()}>Sign out</Button>
         <Button icon={LogOut} onClick={logoutAll}>Sign out everywhere</Button>
         <Button variant="danger" icon={UserX} onClick={deleteAccount} data-testid="delete-account">Delete account</Button>

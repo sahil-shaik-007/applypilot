@@ -156,6 +156,9 @@ CREATE INDEX IF NOT EXISTS push_targets_owner ON push_targets(owner_id);
 
 /** Additive migrations for databases created by older versions. */
 function migrate(db) {
+  const userCols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+  // The name the user chose for their portal. Google sign-in only rewrites `name`, never this.
+  if (!userCols.has('display_name')) db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
   const cols = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name));
   if (!cols.has('id')) db.exec('ALTER TABLE sessions ADD COLUMN id TEXT');
   if (!cols.has('kind')) db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'");
@@ -185,6 +188,7 @@ function createRepo(db) {
     userById: s('SELECT * FROM users WHERE id = ?'),
     insertUser: s('INSERT INTO users (id, google_sub, email, name, picture, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
     updateUser: s('UPDATE users SET email = ?, name = ?, picture = ? WHERE id = ?'),
+    setDisplayName: s('UPDATE users SET display_name = ? WHERE id = ?'),
 
     insertSession: s("INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, id, kind) VALUES (?, ?, ?, ?, ?, ?, 'web')"),
     insertNativeSession: s("INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, id, kind, name, platform) VALUES (?, ?, ?, ?, ?, ?, 'native', ?, ?)"),

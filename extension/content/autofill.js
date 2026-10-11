@@ -1,17 +1,23 @@
 // ApplyPilot autofill (content script, injected on demand with activeTab, after content/shared.js).
 //
+// Two entry points, used in this order by the popup:
+//   * __apPlan(data)     read only: what a fill would do (fill / differs / needs you). Changes nothing on the page.
+//   * __apAutofill(data) fills the page. Only fields the user confirmed in the check panel are replaced
+//                        (data.overwriteKeys) and typed values for required fields come in as data.manual.
+//
 // Uses the desktop app's own field scanner (__apScan) and answerer (__apAnswers.answerFromProfile +
 // bestOption), then the Answer bank, to fill the visible application form.
 //
 // Hard rules (also see docs/EXTENSION.md):
 //   * never submits — a capturing submit blocker is active while filling and no submit control is ever clicked
 //   * never touches password / OTP / payment / CAPTCHA fields
-//   * never overwrites a value that is already there (unless options.overwrite)
+//   * never overwrites a value that is already there unless the user ticked it in the check panel
 //   * never solves CAPTCHAs — it only tells you one is present
+//   * never sends anything anywhere: the only network traffic is the popup/background talking to 127.0.0.1
 /* eslint-disable no-undef */
 (function () {
   'use strict';
-  if (globalThis.__apAutofill) return;
+  if (globalThis.__apAutofill && globalThis.__apPlan) return;
 
   const A = () => globalThis.__apAnswers;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,6 +50,44 @@
   };
   const isEmpty = (a) => a == null || (typeof a === 'string' && !a.trim()) || (Array.isArray(a) && !a.length);
   const hasValue = (f) => (Array.isArray(f.value) ? f.value.length > 0 : !!(f.value && String(f.value).trim()));
+  const present = (v) => v != null && String(v).trim() !== '';
+  const showVal = (v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v)).replace(/\s+/g, ' ').trim();
+  const sameVal = (a, b) => showVal(a).toLowerCase() === showVal(b).toLowerCase();
+
+  // ------------------------------------------------------------------ identity fields
+  // Decided here, before the desktop answerer: "Address" / "Location" get "City, Country", and a phone field gets
+  // the national number, but only when the same form has a separate country-code field to hold the code.
+  // Otherwise the full number is used, so a single phone box still gets a usable value.
+  const PHONE_Q = /phone|mobile|telephone|\btel\b/i;
+  const PHONE_NOT_NATIONAL = /country code|dial|international|with (the )?code|whatsapp|fax|extension|\bext\b/i;
+  const ADDRESS_Q = /^\s*(your |current |home |full |mailing |residential |present )?(address|location|current location|city and country|city, country|where are you (currently )?(located|based))\s*[?:*]?\s*$/i;
+  const CODE_FIELD_Q = /country code|dial(ing)? code|phone code|calling code/i;
+  const codeFieldPresent = (fields) => fields.some((f) => f.kind !== 'file' && CODE_FIELD_Q.test(f.question || ''));
+  function nationalPhone(p) {
+    const ph = String(p.phone || '').trim();
+    if (!ph) return null;
+    if (!ph.startsWith('+')) return ph;
+    const cc = String(p.phoneCountryCode || '').replace(/\D/g, '');
+    const digits = ph.replace(/\D/g, '');
+    return cc && digits.startsWith(cc) ? digits.slice(cc.length) : ph;
+  }
+  function identityOverride(f, p, hasCodeField) {
+    const q = String(f.question || '').trim();
+    if ((f.kind === 'text' || f.kind === 'combobox') && ADDRESS_Q.test(q)) {
+      return [p.city, p.country].filter(present).join(', ') || null;
+    }
+    const hint = q || `${f.name || ''} ${f.id || ''} ${f.autocomplete || ''}`;
+    if (f.kind === 'text' && PHONE_Q.test(hint) && !PHONE_NOT_NATIONAL.test(hint)) {
+      if (hasCodeField) return nationalPhone(p);
+      return present(p.phone) ? String(p.phone).trim() : null;
+    }
+    return null;
+  }
+  // "File" fields: the resume upload is the one whose label, name or surrounding text says resume/CV.
+  function fileFieldsOf(fields) {
+    const files = fields.filter((f) => f.kind === 'file');
+    return files.map((f) => ({ key: f.key, kind: classifyFile(f, files.length), question: f.question, required: !!f.required, hasFile: !!f.hasFile }));
+  }
 
   function fieldType(f) {
     switch (f.kind) {
@@ -245,12 +289,15 @@
   // ------------------------------------------------------------------ main fill
   async function autofill(data) {
     if (!A() || !globalThis.__apScan) throw new Error('ApplyPilot helpers are not loaded');
-    const o = { overwrite: false, highlight: true, learn: true, ...(data.options || {}) };
+    const o = { highlight: true, learn: true, ...(data.options || {}) };
     state.highlight = o.highlight;
     state.learnEnabled = o.learn;
     const profile = data.profile || {};
     const job = data.job || {};
     const bank = data.answers || [];
+    // Only the fields the user ticked in the check panel may replace a value that is already on the page.
+    const overwriteKeys = new Set(Array.isArray(data.overwriteKeys) ? data.overwriteKeys : []);
+    const manual = data.manual && typeof data.manual === 'object' ? data.manual : {};
     const out = { filled: 0, answered: [], unanswered: [], prefilled: 0, skippedSensitive: 0, fileFields: [], captcha: visibleCaptcha(), total: 0 };
 
     await withSubmitGuard(async () => {
@@ -258,8 +305,8 @@
       for (let pass = 0; pass < 3; pass++) {
         const fields = globalThis.__apScan({ exclude: EXCLUDE });
         state.fields = fields;
-        const files = fields.filter((f) => f.kind === 'file');
-        out.fileFields = files.map((f) => ({ key: f.key, kind: classifyFile(f, files.length), question: f.question, required: !!f.required, hasFile: !!f.hasFile }));
+        out.fileFields = fileFieldsOf(fields);
+        const ctx = { profile, job, bank, coverLetterText: data.coverLetterText, manual, hasCodeField: codeFieldPresent(fields) };
         const todo = fields.filter((f) => f.kind !== 'file' && !processed.has(f.key));
         if (!todo.length) break;
         for (const f of todo) {
@@ -267,9 +314,9 @@
           out.total++;
           if (sensitive(f)) { out.skippedSensitive++; continue; }
           if (!f.question && !f.name && !f.id) continue;
-          if (hasValue(f) && !o.overwrite && f.kind !== 'checkbox') { out.prefilled++; continue; }
+          if (hasValue(f) && !overwriteKeys.has(f.key)) { out.prefilled++; continue; }
           try {
-            await fillOne(f, { profile, job, bank, coverLetterText: data.coverLetterText }, out);
+            await fillOne(f, ctx, out);
           } catch (e) {
             if (f.question) out.unanswered.push({ key: f.key, question: f.question, required: !!f.required, error: String(e && e.message || e).slice(0, 100) });
           }
@@ -297,13 +344,16 @@
     return byKey(f.key);
   }
 
-  async function fillOne(f, ctx, out) {
+  // The answer for one field. A typed value from the check panel wins; otherwise identity rules, the profile
+  // answerer, then the Answer bank. Dropdown options are only read when openCombos is set (the fill does that,
+  // the read-only plan does not), so planning never opens a dropdown.
+  async function resolveAnswer(f, ctx, openCombos) {
     const { answerFromProfile, bestOption } = A();
     const type = fieldType(f);
     let options = f.options || [];
     if (f.kind === 'combobox') {
       f._typeahead = LOCATIONISH.test(f.question || '');
-      if (!f._typeahead) {
+      if (openCombos && !f._typeahead) {
         const el = byKey(f.key);
         options = el ? await openCombo(el) : [];
         if (el) closeCombo(el);
@@ -316,11 +366,18 @@
       placeholder: f.placeholder, autocomplete: f.autocomplete, coverLetterText: ctx.coverLetterText || null,
       single: f.kind === 'checkbox', kind: f.kind,
     };
-    let ans = answerFromProfile(f.question, info, ctx.profile, ctx.job);
+    let ans = null;
     let source = 'profile';
-    if (isEmpty(ans) && f.question && f.question.length > 1) {
-      ans = fromBank(f.question, ctx.bank);
-      source = 'answer bank';
+    if (ctx.manual && ctx.manual[f.key] != null && ctx.manual[f.key] !== '') {
+      ans = ctx.manual[f.key];
+      source = 'typed';
+    } else {
+      ans = identityOverride(f, ctx.profile, ctx.hasCodeField);
+      if (isEmpty(ans)) ans = answerFromProfile(f.question, info, ctx.profile, ctx.job);
+      if (isEmpty(ans) && f.question && f.question.length > 1) {
+        ans = fromBank(f.question, ctx.bank);
+        source = 'answer bank';
+      }
     }
     if (!isEmpty(ans) && options.length) {
       if (type === 'checkbox' && !info.single) {
@@ -331,11 +388,16 @@
         ans = options.includes(s) ? s : bestOption(options, s);
       }
     }
+    return { ans, source, options };
+  }
+
+  async function fillOne(f, ctx, out) {
+    const { ans, source } = await resolveAnswer(f, ctx, true);
     if (isEmpty(ans)) {
       if (!hasValue(f) && (f.required || f.kind !== 'checkbox')) out.unanswered.push({ key: f.key, question: f.question || f.name, required: !!f.required });
       return;
     }
-    if (f.kind === 'checkbox' && !/^(yes|true)/i.test(String(ans)) && !f.value) return; // optional "No" checkboxes: nothing to do
+    if (f.kind === 'checkbox' && !/^(yes|true)/i.test(String(Array.isArray(ans) ? ans[0] : ans)) && !f.value) return; // optional "No" checkboxes: nothing to do
     const ok = await applyAnswer(f, ans);
     if (ok) {
       out.filled++;
@@ -343,6 +405,53 @@
     } else {
       out.unanswered.push({ key: f.key, question: f.question || f.name, required: !!f.required });
     }
+  }
+
+  // ------------------------------------------------------------------ check before filling (read only)
+  // What a fill would do, for the popup's check panel. Nothing on the page changes: dropdowns are not opened,
+  // so a dropdown's planned value is the closest text and the exact option is matched when the fill runs.
+  async function plan(data) {
+    if (!A() || !globalThis.__apScan) throw new Error('ApplyPilot helpers are not loaded');
+    const fields = globalThis.__apScan({ exclude: EXCLUDE });
+    const ctx = {
+      profile: data.profile || {}, job: data.job || {}, bank: data.answers || [], coverLetterText: data.coverLetterText || null,
+      manual: null, hasCodeField: codeFieldPresent(fields),
+    };
+    const items = [];
+    const counts = { fill: 0, differs: 0, same: 0, kept: 0, needs: 0, empty: 0, sensitive: 0 };
+    for (const f of fields) {
+      if (f.kind === 'file') continue;
+      if (sensitive(f)) { counts.sensitive++; continue; }
+      if (!f.question && !f.name && !f.id) continue;
+      const { ans, source, options } = await resolveAnswer(f, ctx, false);
+      const label = String(f.question || f.name || f.id || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+      const page = hasValue(f) ? showVal(f.value) : '';
+      const want = isEmpty(ans) ? '' : showVal(ans);
+      let status;
+      if (f.kind === 'checkbox') {
+        const yes = !isEmpty(ans) && /^(yes|true)/i.test(String(Array.isArray(ans) ? ans[0] : ans));
+        if (isEmpty(ans)) status = hasValue(f) ? 'kept' : (f.required ? 'needs' : 'empty');
+        else if (!hasValue(f)) status = yes ? 'fill' : 'same';
+        else status = yes ? 'same' : 'differs';
+      } else if (isEmpty(ans)) {
+        status = hasValue(f) ? 'kept' : (f.required ? 'needs' : 'empty');
+      } else if (!hasValue(f)) {
+        status = 'fill';
+      } else {
+        status = sameVal(page, want) ? 'same' : 'differs';
+      }
+      counts[status]++;
+      if (status === 'fill' || status === 'differs' || status === 'needs') {
+        items.push({
+          key: f.key, label, kind: f.kind, status, value: want, page, required: !!f.required, source,
+          options: (options.length ? options : f.options || []).slice(0, 80),
+        });
+      }
+    }
+    return {
+      items, counts, total: fields.filter((f) => f.kind !== 'file').length,
+      fileFields: fileFieldsOf(fields), captcha: visibleCaptcha(),
+    };
   }
 
   // ------------------------------------------------------------------ resume upload
@@ -446,6 +555,7 @@
     } catch { /* page CSP / odd documents */ }
   }
 
+  globalThis.__apPlan = plan;
   globalThis.__apAutofill = autofill;
   globalThis.__apAttachResume = attachFile;
   globalThis.__apCollectAnswers = collectAnswers;

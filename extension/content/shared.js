@@ -593,7 +593,9 @@ function answerRaw(question, fi, p, job) {
   }
   if (/time ?zone/.test(q)) return p.timezone || null;
   if (/zip|postal|post code|postcode|pin ?code/.test(q)) return p.postalCode || null;
-  if (/street|address line 1|^address$|mailing address|home address|address 1|residential address/.test(q)) {
+  // A bare "Address" asks for the full place (street, city, state, country), e.g. Workable's field.
+  if (/^address$/.test(q)) return [p.addressLine1, p.addressLine2, p.city, p.state, p.country].filter(has).join(', ') || null;
+  if (/street|address line 1|mailing address|home address|address 1|residential address/.test(q)) {
     if (/line 2|address 2/.test(q)) return p.addressLine2 || null;
     return p.addressLine1 || null;
   }
@@ -949,18 +951,21 @@ module.exports = { answerFromProfile, bestOption, norm, polarity, parseRange, co
   };
   const reqOf = (els, lab) => els.some((e) => e.required || e.getAttribute('aria-required') === 'true') || isRequiredText(lab.raw);
 
-  const all = deepAll(root, 'input,select,textarea,[role=combobox],[aria-pressed]');
+  const all = deepAll(root, 'input,select,textarea,[role=combobox],[aria-pressed],[role=radio]');
   const fields = [];
   const seenGroups = new Set();
   const excluded = (el) => (excludeSel && el.closest(excludeSel)) ||
     /recaptcha|hcaptcha|h-captcha|cf-turnstile/i.test(`${el.name || ''} ${el.id || ''} ${el.className || ''}`) ||
     (el.closest && el.closest('.iti__dropdown-content,.iti__country-container,[role=dialog][aria-modal=true] .iti'));
 
-  // button groups (Ashby Yes/No etc.) first, so we can suppress their hidden checkbox
+  // button groups (Ashby Yes/No etc.) first, so we can suppress their hidden checkbox.
+  // Also ARIA radio options (role=radio + aria-checked, e.g. Workable YES/NO inside a radiogroup).
+  const isPressBtn = (b) => b.hasAttribute('aria-pressed') || b.getAttribute('role') === 'radio';
+  const isOn = (b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true';
   const pressGroups = new Map();
   for (const b of all) {
-    if (!b.hasAttribute || !b.hasAttribute('aria-pressed') || excluded(b) || !isVisible(b)) continue;
-    const p = b.parentElement; if (!p) continue;
+    if (!b.hasAttribute || !isPressBtn(b) || excluded(b) || !isVisible(b)) continue;
+    const p = (b.getAttribute('role') === 'radio' && b.closest('[role=radiogroup]')) || b.parentElement; if (!p) continue;
     if (!pressGroups.has(p)) pressGroups.set(p, []);
     pressGroups.get(p).push(b);
   }
@@ -971,12 +976,14 @@ module.exports = { answerFromProfile, bestOption, norm, polarity, parseRange, co
     const key = tag(p);
     const opts = btns.map((b, i) => { b.setAttribute('data-ap-id', key); b.setAttribute('data-ap-opt', String(i)); return clean(rawText(b)); });
     const lab = labelOf(p.querySelector('input') || btns[0], { group: [...btns, ...p.querySelectorAll('input')], optionLabels: opts });
-    const pressed = btns.find((b) => b.getAttribute('aria-pressed') === 'true');
-    fields.push({ key, kind: 'buttons', question: lab.text, required: isRequiredText(lab.raw) || !!p.querySelector('input[required]'), options: opts, value: pressed ? clean(rawText(pressed)) : '' });
+    const pressed = btns.find(isOn);
+    // a Yes/No question with no readable label is still reported (as its options), never silently dropped
+    fields.push({ key, kind: 'buttons', question: lab.text || opts.join(' / '), required: isRequiredText(lab.raw) || !!p.querySelector('input[required]') || btns.some((b) => b.getAttribute('aria-required') === 'true'), options: opts, value: pressed ? clean(rawText(pressed)) : '' });
   }
 
   for (const el of all) {
     if (el.hasAttribute('aria-pressed') && el.tagName !== 'INPUT') continue;
+    if (el.getAttribute('role') === 'radio' && el.tagName !== 'INPUT') continue; // ARIA option (grouped above)
     const tg = el.tagName;
     const type = (el.getAttribute('type') || (tg === 'INPUT' ? 'text' : tg.toLowerCase())).toLowerCase();
     if (tg === 'INPUT' && type === 'password') continue; // never touch credentials
@@ -985,6 +992,7 @@ module.exports = { answerFromProfile, bestOption, norm, polarity, parseRange, co
     if (excluded(el)) continue;
     if (el.disabled || el.readOnly && el.getAttribute('role') !== 'combobox' && tg !== 'SELECT') { if (type !== 'file') continue; }
     if (el.parentElement && groupedParents.has(el.parentElement)) continue;
+    if (tg === 'INPUT' && el.closest && el.closest('[role=radio]')) continue; // hidden native input inside an ARIA radio option
     if (type === 'file') {
       if (hiddenByAncestor(el) && !nearVisible(el, 6)) continue;
       const key = tag(el);

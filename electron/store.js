@@ -74,9 +74,25 @@ function createStore(baseDir) {
     network: c('network', { items: [], importedAt: null }), // LinkedIn connections (local only)
     cloud: c('cloud', {}), // phone/web sync link (token + data key are DPAPI-encrypted)
     careerPages: c('career-pages', { items: [] }), // any company careers pages the user watches
+    profiles: c('profiles', { items: [] }), // extra people (synced from the phone/web vault): { id, label, values, createdAt, updatedAt }
   };
   // Make sure new default settings keys appear after upgrades.
   store.settings.data = { ...DEFAULT_SETTINGS, ...store.settings.data, keys: { ...(store.settings.data.keys || {}) } };
+
+  // The profile an application is for. 'main' (or no id, or an unknown id) is the global profile/main record.
+  store.resolveProfile = (id) => {
+    const pid = id && id !== 'main' ? String(id) : 'main';
+    if (pid !== 'main') {
+      const p = store.profiles.get().items.find((x) => x.id === pid);
+      if (p) return { id: pid, label: p.label || 'Profile', values: p.values || {} };
+    }
+    return { id: 'main', label: 'Main profile', values: store.profile.get().values || {} };
+  };
+  // Resumes usable for a profile: shared ones (profileId null) and ones tagged for that profile.
+  store.resumesFor = (id) => {
+    const pid = id && id !== 'main' ? String(id) : 'main';
+    return store.resumes.get().items.filter((r) => !r.profileId || r.profileId === pid);
+  };
   store.flushAll = () => Object.values(store).forEach((v) => v instanceof Collection && v.flush());
   return store;
 }

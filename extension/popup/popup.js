@@ -104,27 +104,187 @@ async function save(status) {
   $('saveBtn').textContent = 'Saved ✓';
 }
 
-async function autofill() {
+// ---- autofill: step 1 shows the check panel (nothing changes on the page), step 2 fills after you confirm.
+let check = null;        // the plan currently shown in the check panel
+let diffBoxes = [];      // [{ key, cb }] tick boxes for fields that already have a different value
+let needInputs = [];     // [{ item, el }] answers typed for required fields with no value
+let resumeBox = null;    // checkbox "attach resume" (only when the page has an empty resume upload)
+
+const clip = (s, n = 60) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+function li(text) { const el = document.createElement('li'); el.textContent = text; return el; }
+function checkRow(labelText, input, sub) {
+  const row = document.createElement('label');
+  row.className = 'check-row';
+  const txt = document.createElement('div');
+  txt.className = 'grow';
+  const t = document.createElement('div');
+  t.className = 'check-label';
+  t.textContent = labelText;
+  txt.appendChild(t);
+  if (sub) { const s = document.createElement('div'); s.className = 'small muted'; s.textContent = sub; txt.appendChild(s); }
+  row.append(input, txt);
+  return row;
+}
+
+async function reviewFill() {
   $('fillBtn').disabled = true;
-  setMsg('fillMsg', 'Filling…', '');
-  const r = await send({ type: 'autofill', tabId });
+  setMsg('fillMsg', 'Reading the form and your profile…', '');
+  const r = await send({ type: 'autofillPlan', tabId });
   $('fillBtn').disabled = false;
   if (!r.ok) { setMsg('fillMsg', r.error, 'err'); return; }
-  const d = r.data;
+  setMsg('fillMsg', '', '');
+  renderCheck(r.data);
+  show('fillCheck');
+  $('fillCheck').scrollIntoView({ block: 'nearest' });
+}
+
+function renderCheck(d) {
+  check = d;
+  const p = d.plan;
+  const counts = p.counts || {};
+  const who = `Filling ${d.job.title ? `“${clip(d.job.title, 80)}”` : 'this form'} as ${d.profile.name || 'your ApplyPilot profile'}.`;
+  const tracked = d.application ? ` Tracked in ApplyPilot (${d.application.status || 'saved'}).` : ' Not in your ApplyPilot tracker: the current profile is used.';
+  $('checkWho').textContent = who + tracked;
+  setMsg('checkMsg', '', '');
+  show('checkCaptcha', false);
+  if (p.captcha) { $('checkCaptcha').textContent = `${p.captcha} on this page: complete it yourself.`; show('checkCaptcha'); }
+
+  const fill = p.items.filter((i) => i.status === 'fill');
+  $('checkFill').replaceChildren(...fill.slice(0, 40).map((i) => li(`${clip(i.label, 80)}: ${clip(i.value, 80)}`)));
+  show('checkFillSec', fill.length > 0);
+
+  diffBoxes = [];
+  const diffs = p.items.filter((i) => i.status === 'differs');
+  $('checkDiff').replaceChildren(...diffs.map((i) => {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!d.overwriteDefault;
+    cb.addEventListener('change', refreshConfirm);
+    diffBoxes.push({ key: i.key, cb });
+    return checkRow(clip(i.label, 80), cb, `page has “${clip(i.page, 50)}” · ApplyPilot “${clip(i.value, 50)}”`);
+  }));
+  show('checkDiffSec', diffs.length > 0);
+
+  needInputs = [];
+  const needs = p.items.filter((i) => i.status === 'needs');
+  $('checkNeeds').replaceChildren(...needs.map((i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'need';
+    const lab = document.createElement('div');
+    lab.className = 'check-label';
+    lab.textContent = clip(i.label, 120);
+    const star = document.createElement('span');
+    star.className = 'req';
+    star.textContent = ' *';
+    lab.appendChild(star);
+    const choices = i.kind === 'checkbox' ? ['Yes', 'No'] : (i.options || []);
+    let el;
+    if (choices.length) {
+      el = document.createElement('select');
+      const none = document.createElement('option');
+      none.value = ''; none.textContent = 'Choose…';
+      el.appendChild(none);
+      for (const o of choices) { const op = document.createElement('option'); op.value = o; op.textContent = o; el.appendChild(op); }
+    } else {
+      el = document.createElement('input');
+      el.type = 'text';
+      el.maxLength = 500;
+      el.placeholder = 'Type your answer';
+      el.autocomplete = 'off';
+    }
+    el.className = 'check-in';
+    el.addEventListener('input', refreshConfirm);
+    el.addEventListener('change', refreshConfirm);
+    needInputs.push({ item: i, el });
+    wrap.append(lab, el);
+    return wrap;
+  }));
+  show('checkNeedsSec', needs.length > 0);
+
+  resumeBox = null;
+  const r = d.resume || {};
+  const rl = $('checkResume');
+  rl.replaceChildren();
+  if (r.attachable) {
+    resumeBox = document.createElement('input');
+    resumeBox.type = 'checkbox';
+    resumeBox.checked = true;
+    resumeBox.addEventListener('change', refreshConfirm);
+    rl.appendChild(checkRow(`Attach ${clip(r.fileName, 60)}`, resumeBox, `to “${clip(r.fieldLabel, 60)}”`));
+  } else if (r.fileName) {
+    rl.textContent = `Resume: ${r.fileName} (${r.reason || 'not attached'}).`;
+  } else if (r.reason) {
+    rl.textContent = `Resume: ${r.reason}.`;
+  }
+
+  const notes = [];
+  if (counts.same) notes.push(`${counts.same} already match`);
+  if (counts.kept) notes.push(`${counts.kept} keep their current value`);
+  if (counts.empty) notes.push(`${counts.empty} optional left blank`);
+  if (counts.sensitive) notes.push(`${counts.sensitive} sensitive skipped (passwords, card and ID fields)`);
+  notes.push('Dropdowns are matched to the closest option when filled.');
+  $('checkNotes').textContent = p.total ? notes.join(' · ') : 'No form fields found on this page.';
+  refreshConfirm();
+}
+
+// Counts what the confirm button will do: planned fills, ticked replacements, typed answers, ticked resume.
+function refreshConfirm() {
+  if (!check) return;
+  const planned = check.plan.items.filter((i) => i.status === 'fill').length;
+  const replaced = diffBoxes.filter((b) => b.cb.checked).length;
+  const typed = needInputs.filter((n) => n.el.value.trim()).length;
+  const resume = resumeBox && resumeBox.checked ? 1 : 0;
+  const n = planned + replaced + typed + resume;
+  $('confirmFill').textContent = n ? `Fill ${n} ${n === 1 ? 'item' : 'items'}` : 'Nothing to fill';
+  $('confirmFill').disabled = !check.plan.total;
+}
+
+async function confirmFill() {
+  if (!check) return;
+  const overwriteKeys = diffBoxes.filter((b) => b.cb.checked).map((b) => b.key);
+  const manual = needInputs
+    .map(({ item, el }) => ({ key: item.key, question: item.label, value: el.value.trim(), options: item.options || [] }))
+    .filter((m) => m.value);
+  const attachResume = !!(resumeBox && resumeBox.checked);
+  $('confirmFill').disabled = true;
+  $('cancelFill').disabled = true;
+  setMsg('checkMsg', 'Filling…', '');
+  const r = await send({ type: 'autofillApply', tabId, overwriteKeys, manual, attachResume });
+  $('confirmFill').disabled = false;
+  $('cancelFill').disabled = false;
+  if (!r.ok) { setMsg('checkMsg', r.error, 'err'); return; }
+  show('fillCheck', false);
+  check = null;
+  showFillResult(r.data);
+}
+
+function cancelFill() {
+  check = null;
+  show('fillCheck', false);
+}
+
+function showFillResult(d) {
   const parts = [`Filled ${d.filled} field${d.filled === 1 ? '' : 's'}`];
   if (d.resume && d.resume.attached) parts.push(`attached ${d.resume.fileName}`);
   if (d.prefilled) parts.push(`${d.prefilled} already filled`);
   if (d.skippedSensitive) parts.push(`${d.skippedSensitive} sensitive skipped`);
   let text = `${parts.join(' · ')}. Review, then click Submit yourself.`;
-  if (d.resume && d.resume.reason) text += ` Resume: ${d.resume.reason}.`;
-  if (d.captcha) text += ` ${d.captcha} detected — complete it yourself.`;
-  setMsg('fillMsg', text, d.captcha || d.unanswered.length ? 'warn' : 'ok');
+  if (d.resume && !d.resume.attached && d.resume.reason) {
+    text += d.resume.fileName ? ` Resume: attach ${d.resume.fileName} by hand (${d.resume.reason}).` : ` Resume: ${d.resume.reason}.`;
+  }
+  if (d.savedAnswers) {
+    if (d.savedAnswers.error) text += ` Typed answers were not saved to ApplyPilot (${d.savedAnswers.error}); they were used for this fill only.`;
+    else if (d.savedAnswers.added || d.savedAnswers.updated) text += ` Saved ${d.savedAnswers.added + d.savedAnswers.updated} answer(s) to your Answer bank.`;
+  }
+  if (d.captcha) text += ` ${d.captcha} detected: complete it yourself.`;
+  const needsResume = d.resume && !d.resume.attached && d.resume.reason;
+  setMsg('fillMsg', text, d.captcha || d.unanswered.length || needsResume ? 'warn' : 'ok');
   if (d.unanswered.length) {
     $('needsList').replaceChildren(...d.unanswered.slice(0, 12).map((u) => {
-      const li = document.createElement('li');
-      li.textContent = u.question;
-      if (u.required) { const s = document.createElement('span'); s.className = 'req'; s.textContent = ' *'; li.appendChild(s); }
-      return li;
+      const el = document.createElement('li');
+      el.textContent = u.question;
+      if (u.required) { const s = document.createElement('span'); s.className = 'req'; s.textContent = ' *'; el.appendChild(s); }
+      return el;
     }));
     show('needs');
   }
@@ -142,7 +302,9 @@ async function init() {
   $('optionsLink').addEventListener('click', (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
   $('saveBtn').addEventListener('click', () => save());
   $('queueBtn').addEventListener('click', () => save('queued'));
-  $('fillBtn').addEventListener('click', autofill);
+  $('fillBtn').addEventListener('click', reviewFill);
+  $('confirmFill').addEventListener('click', confirmFill);
+  $('cancelFill').addEventListener('click', cancelFill);
   $('learnBtn').addEventListener('click', learn);
 
   tabId = await currentTabId();

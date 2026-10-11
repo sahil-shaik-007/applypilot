@@ -115,6 +115,19 @@ function resumeNameWarning(profile, resume) {
   return `The name "${missing.join(' ')}" from your profile does not appear in the resume "${resume.fileName || 'resume'}". Check the Profile name before submitting.`;
 }
 
+// Name and email must come from the user's profile (or the resume when the profile is empty). Say so when the
+// profile itself lacks them; the form is never filled from a saved browser draft.
+function identityGapWarning(profile, effective, resume) {
+  const need = { firstName: 'first name', lastName: 'last name', email: 'email' };
+  const saved = Object.keys(need).filter((k) => !(profile && String((profile || {})[k] || '').trim()));
+  if (!saved.length) return null;
+  const names = saved.map((k) => need[k]);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+  const fromResume = saved.every((k) => effective && effective[k]);
+  if (fromResume) return `Your profile has no ${list} yet, so ApplyPilot is using the details from "${(resume && resume.fileName) || 'your resume'}". Add them in Profile to be sure they are yours.`;
+  return `Your profile needs your ${list} before this application. Add it in Profile; ApplyPilot will not fill it from a saved browser draft.`;
+}
+
 class ApplyEngine {
   constructor({ userDataDir, getSettings, log } = {}) {
     this.userDataDir = userDataDir || path.join(process.cwd(), '.applypilot');
@@ -208,12 +221,33 @@ class ApplyEngine {
     }
   }
 
-  async openUrl(url) {
+  // Opens a tab in the shared browser profile. For an application page (opts.job/profile/resume given) the
+  // page starts without any saved draft and identity fields are filled from the profile or resume only.
+  async openUrl(url, opts = {}) {
     const ctx = await this._ensureContext();
     const page = await ctx.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => this.log(`[apply] openUrl: ${e.message}`));
+    const warnings = [];
+    const adapter = this.pickAdapter(opts.job || {}, url);
+    const apply = !!(opts.job || opts.profile) && adapter.id === 'workable';
+    if (apply && adapter.draftInitScript) await page.addInitScript(adapter.draftInitScript).catch(() => {});
+    const target = apply && adapter.resolveUrl ? adapter.resolveUrl({ applyUrl: url }) : url;
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => this.log(`[apply] openUrl: ${e.message}`));
+    if (apply) {
+      const profile = opts.profile || {};
+      const effectiveProfile = profileWithResumeIdentity(profile, opts.resume);
+      const gap = identityGapWarning(profile, effectiveProfile, opts.resume);
+      if (gap) warnings.push(gap);
+      const ictx = {
+        job: opts.job || {}, profile: effectiveProfile, resume: opts.resume || {}, page, mode: 'review', human: false, allowSubmit: false,
+        emit: (type, message) => { if (type === 'warn') warnings.push(message); }, log: (m) => this.log(`[apply] ${m}`),
+      };
+      try {
+        await adapter.prepare(page, ictx);
+        await adapter.prefillIdentity(page, ictx);
+      } catch (e) { this.log(`[apply] openUrl prefill: ${e.message}`); }
+    }
     await page.bringToFront().catch(() => {});
-    return true;
+    return { ok: true, warnings };
   }
 
   async close() {
@@ -271,6 +305,8 @@ class ApplyEngine {
       const effectiveProfile = profileWithResumeIdentity(profile, resume);
       const nameWarn = resumeNameWarning(effectiveProfile, resume);
       if (nameWarn) emit('warn', nameWarn);
+      const gapWarn = identityGapWarning(profile, effectiveProfile, resume);
+      if (gapWarn) emit('warn', gapWarn);
       const ctx = {
         job, profile: effectiveProfile, resume, coverLetterText, answerQuestion, signal, settings, mode, page,
         human: settings.humanDelays !== false && mode !== 'dryrun',
@@ -279,6 +315,8 @@ class ApplyEngine {
       };
 
       emit('step', `Opening ${adapter.id === 'generic' ? 'application page' : adapter.id + ' form'}`, { url: target });
+      // Workable restores a saved draft from the browser profile; start from a clean page so no earlier person's values appear.
+      if (adapter.draftInitScript) await page.addInitScript(adapter.draftInitScript).catch(() => {});
       await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
       throwIfAborted(signal);

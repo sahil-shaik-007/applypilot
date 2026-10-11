@@ -22,7 +22,9 @@ async function identityHook(frame, f, ctx) {
   const page = String(f.value || '').trim();
   if (!want) {
     if (!page) return undefined; // nothing to give and nothing pre-filled: generic handling reports it if required
-    ctx.emit('warn', `${label} is pre-filled with "${page}", which is not in your profile or resume. Check it before submitting.`, { question: label });
+    // Not from the profile or resume, so it may belong to someone else: clear it rather than submit it.
+    await dom.fillText(frame, `[data-ap-id="${f.key}"]`, '', ctx).catch(() => {});
+    ctx.emit('warn', `${label} was pre-filled with "${page}", which is not in your profile or resume, so it was cleared. Enter yours.`, { question: label });
     return 'unanswered';
   }
   if (name === 'phone' && ctx.profile.phoneCountryCode) {
@@ -38,6 +40,16 @@ async function identityHook(frame, f, ctx) {
   if (!(await dom.fillText(frame, `[data-ap-id="${f.key}"]`, String(want), ctx))) return 'unanswered';
   ctx.emit('filled', `${label} → ${want}`, { question: label, answer: want, source: 'profile' });
   return 'filled';
+}
+
+// Runs before the page's own scripts (once per tab) and removes Workable's saved per-job drafts, so the
+// form never restores a draft left by an earlier session or another person. Identity is then filled from the profile.
+function clearWorkableDraft() {
+  try {
+    if (!/(^|\.)workable\.com$/.test(location.hostname) || sessionStorage.getItem('ap-draft-cleared')) return;
+    sessionStorage.setItem('ap-draft-cleared', '1');
+    Object.keys(localStorage).filter((k) => k.startsWith('evergreen-persistence-')).forEach((k) => localStorage.removeItem(k));
+  } catch (e) { /* storage blocked: nothing to clear */ }
 }
 
 // True when the resume card shown on the page is the file ApplyPilot is uploading. The page shows the
@@ -104,6 +116,17 @@ module.exports = {
       if (!ok) result.unanswered = [...(result.unanswered || []), { question: 'Resume (could not be attached; attach it yourself)', required: true }];
     }
     return result;
+  },
+  draftInitScript: clearWorkableDraft,
+  // "Open & finish": fills only name, email, phone and address from the profile (or resume). No resume upload,
+  // no questions and nothing submitted; the user completes the rest in the tab.
+  async prefillIdentity(page, ctx) {
+    const frame = page.mainFrame();
+    const fields = await dom.scanFields(frame, { root: 'form[data-ui="application-form"], main form, form' });
+    for (const f of fields) {
+      if (!IDENTITY[String(f.name || '').toLowerCase()]) continue;
+      await identityHook(frame, f, ctx);
+    }
   },
   async submit(page, ctx) {
     if (!ctx.allowSubmit) throw new dom.SubmitGuardError('submit() called without allowSubmit');

@@ -8,8 +8,9 @@
 import { useSyncExternalStore } from 'react';
 import { newId } from '@shared/vaultCrypto.js';
 import { scamSignals, eligibility } from '@shared/eligibility.js';
-import { attemptsToday, bestAnswer, worthAsking, resultStatus, fillTemplate, DEFAULT_COVER_TEMPLATE } from '@shared/campaignRules.js';
-import { getApplication, patchApplication, pickResume, ensureApplication, AUTO_ATS } from './apply.js';
+import { attemptsToday, bestAnswer, worthAsking, resultStatus, fillTemplate, DEFAULT_COVER_TEMPLATE, similarity } from '@shared/campaignRules.js';
+import { getApplication, patchApplication, ensureApplication, AUTO_ATS } from './apply.js';
+import { getProfile, pickResumeFor, snapshotOf, profileIdOf, DEFAULT_PROFILE_ID } from './profiles.js';
 import { coverLetter as aiCoverLetter, answerQuestion as aiAnswer, aiError, DEFAULT_MODEL } from './ai.js';
 import { generateTailored } from './tailored.js';
 import { nat, canApplyInApp, notify, haptic } from './bridge.js';
@@ -68,7 +69,7 @@ export function cancelWindow(app, id, job) {
   });
 }
 
-async function resumeUpload(app, a, job, campaign, apiKey, onStep) {
+async function resumeUpload(app, a, job, campaign, apiKey, onStep, pid) {
   let cur = getApplication(app, a.id);
   if (!cur.tailored && campaign && campaign.tailorResume && apiKey) {
     try {
@@ -82,16 +83,15 @@ async function resumeUpload(app, a, job, campaign, apiKey, onStep) {
   if (cur.tailored && cur.tailored.blobId) {
     try { return { name: cur.tailored.fileName, bytes: await app.sync.getBlob(cur.tailored.blobId), mime: 'application/pdf', tailored: true }; } catch { /* fall back */ }
   }
-  const resume = pickResume(app.resumes, job, cur.resumeId || (campaign && campaign.resumeId) || 'auto');
+  const resume = pickResumeFor(app, job, cur.resumeId || (campaign && campaign.resumeId) || 'auto', pid);
   if (!resume) throw new Error('Upload a resume first (More → Resumes).');
   const bytes = resume.blobId ? await app.sync.getBlob(resume.blobId) : null;
   return { name: resume.fileName || `${resume.name}${resume.ext || '.pdf'}`, bytes, mime: MIME[resume.ext] || 'application/pdf', resumeId: resume.id, resumeName: resume.name };
 }
 
-async function buildCoverLetter(app, cur, job, style, apiKey, resumeText) {
+async function buildCoverLetter(app, cur, job, style, apiKey, resumeText, profile) {
   if (cur.coverLetter) return cur.coverLetter;
   if (style === 'none') return '';
-  const profile = app.profile || {};
   if (style !== 'template' && apiKey) {
     try { return await aiCoverLetter({ apiKey, model: app.settings.aiModel || DEFAULT_MODEL, job, profile, resumeText }); } catch { /* template */ }
   }
@@ -113,11 +113,61 @@ export async function rememberQuestions(app, unanswered = []) {
   return added;
 }
 
+// ---------------------------------------------------------------- open questions of one application
+const normQ = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * The open questions of one application. This is the ONE list the count and the rows both use, so the
+ * number shown always equals the rows listed. `answerRec` is the answer-bank entry that answers the
+ * question (same 0.72 similarity rule the desktop uses when it fills a form), or null when unanswered.
+ */
+export function openQuestions(qa = [], unanswered = []) {
+  const seen = new Set();
+  const out = [];
+  for (const u of unanswered || []) {
+    const q = typeof u === 'string' ? { question: u } : (u || {});
+    const question = String(q.question || '').trim();
+    const key = normQ(question);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, question, required: !!q.required, options: Array.isArray(q.options) ? q.options : [], answerRec: bestAnswer(qa, question) });
+  }
+  return out;
+}
+
+/** Saves an answer to the answer bank: updates the entry that matches the question, or adds one. */
+export async function saveBankAnswer(app, item, answer) {
+  const text = String(answer || '').trim();
+  if (!text) throw new Error('Type an answer first.');
+  const match = item.answerRec || app.qa.find((q) => !q.answer && similarity(q.question, item.question) >= 0.85) || null;
+  const id = match ? match.id : newId();
+  const rec = {
+    ...(match || {}),
+    id,
+    question: match ? match.question : item.question,
+    answer: text,
+    options: match ? (match.options || []) : item.options.slice(0, 30),
+    source: 'user',
+    uses: (match && match.uses) || 0,
+    updatedAt: new Date().toISOString(),
+  };
+  await app.put('qa', id, rec);
+  return rec;
+}
+
+/** Clears one question from an application's open list. The question stays in the answer bank. */
+export async function clearOpenQuestion(app, applicationId, key) {
+  const cur = getApplication(app, applicationId);
+  if (!cur) throw new Error('Application not found');
+  const left = (cur.unanswered || []).filter((u) => normQ(typeof u === 'string' ? u : u && u.question) !== key);
+  await patchApplication(app, applicationId, { unanswered: left }, { type: 'step', message: 'Cleared an unanswered question' });
+}
+
 /** Checks a job before anything is sent (scam = hard stop; blockers need `force`). */
-export function preflight(app, job) {
+export function preflight(app, job, profile) {
   const scam = scamSignals(job);
   if (scam.length) return { ok: false, scam: true, reasons: scam };
-  const el = eligibility(job, app.profile || {});
+  const el = eligibility(job, profile || app.profile || {});
   if (!el.ok) return { ok: false, scam: false, reasons: el.blockers };
   return { ok: true, reasons: [] };
 }
@@ -132,7 +182,12 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
   const a = getApplication(app, applicationId);
   if (!a) throw new Error('Application not found');
   const job = { ...a.job, id: a.jobId, match: a.match };
-  const pf = preflight(app, job);
+  // The person this application is for: its own profile, else its campaign's, else the default profile.
+  const campaign = a.campaignId ? app.sync.get('campaigns', a.campaignId) : null;
+  const pid = a.profileId || (campaign && campaign.profileId) || DEFAULT_PROFILE_ID;
+  const who = getProfile(app, pid);
+  const profile = who.values;
+  const pf = preflight(app, job, profile);
   if (pf.scam) {
     await patchApplication(app, a.id, { status: 'skipped' }, { type: 'blocked', message: `Blocked before sending any data — looks like a scam (${pf.reasons.join(', ')}).` });
     throw new Error(`Blocked: this posting looks like a scam (${pf.reasons.join(', ')}).`);
@@ -142,7 +197,6 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
   const cap = Number(settings.dailyApplyLimit) || 25;
   const all = app.sync.list('applications');
   if (attemptsToday(all) >= cap) throw new Error(`Daily limit of ${cap} applications reached (Settings → Applying).`);
-  const campaign = a.campaignId ? app.sync.get('campaigns', a.campaignId) : null;
   if (campaign && attemptsToday(all, campaign.id) >= (Number(campaign.dailyLimit) || 25)) throw new Error(`"${campaign.name}" reached its daily limit of ${campaign.dailyLimit}.`);
 
   const effMode = (mode || (campaign && campaign.mode !== 'queue' ? campaign.mode : settings.defaultApplyMode) || 'review') === 'auto' ? 'auto' : 'review';
@@ -154,15 +208,14 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
   try {
     step('Preparing application');
     await patchApplication(app, a.id, { status: 'in-progress', attemptedAt: new Date().toISOString(), appliedVia: 'phone-app' }, 'Applying in the ApplyPilot app');
-    const resume = await resumeUpload(app, a, job, campaign, apiKey, step);
-    const base = pickResume(app.resumes, job, a.resumeId || 'auto');
-    const letter = await buildCoverLetter(app, getApplication(app, a.id), job, campaign ? campaign.coverLetter : 'ai', apiKey, base ? base.text : '');
+    const resume = await resumeUpload(app, a, job, campaign, apiKey, step, pid);
+    const base = pickResumeFor(app, job, a.resumeId || 'auto', pid);
+    const letter = await buildCoverLetter(app, getApplication(app, a.id), job, campaign ? campaign.coverLetter : 'ai', apiKey, base ? base.text : '', profile);
     const patch = { coverLetter: letter || null };
     if (resume.resumeId) Object.assign(patch, { resumeId: resume.resumeId, resumeName: resume.resumeName });
     await patchApplication(app, a.id, patch);
     step(`Opening the application with ${resume.tailored ? 'your tailored resume' : `"${resume.name}"`}`);
     const answers = app.sync.list('qa').filter((q) => q.answer).map((q) => ({ id: q.id, question: q.question, answer: q.answer }));
-    const profile = app.profile || {};
     const result = await nat().applyInApp({
       job,
       profile,
@@ -211,8 +264,14 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
 }
 
 /** Starts an in-app application for a job from the job sheet (creates the tracker entry). */
-export async function applyJobInApp(app, job, { resumeId = 'auto', mode, force } = {}) {
-  const a = await ensureApplication(app, job, { status: 'queued', resumeId, message: 'Applying from phone' });
+export async function applyJobInApp(app, job, { resumeId = 'auto', mode, force, profileId } = {}) {
+  const a0 = await ensureApplication(app, job, { status: 'queued', resumeId, profileId, message: 'Applying from phone' });
+  let a = a0;
+  // An existing tracker entry is applied with the profile the user picked for this send.
+  if (profileId && profileIdOf(a0) !== profileId) {
+    const who = getProfile(app, profileId);
+    a = await patchApplication(app, a0.id, { profileId: who.id, profile: snapshotOf(who) }, `Applying as ${who.label}`);
+  }
   if (resumeId !== 'auto' && a.resumeId !== resumeId) {
     const r = app.resumes.find((x) => x.id === resumeId);
     if (r) await patchApplication(app, a.id, { resumeId: r.id, resumeName: r.name });

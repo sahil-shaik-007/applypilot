@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, Check, Loader2, User, MapPin, Link, ShieldCheck, Target, Briefcase, Building2, GraduationCap, Award, FolderGit2, Users, HeartHandshake, FileText, Circle, ChevronDown, CircleAlert, Wand2 } from 'lucide-react';
+import { Plus, Trash2, Check, Loader2, User, MapPin, Link, ShieldCheck, Target, Briefcase, Building2, GraduationCap, Award, FolderGit2, Users, HeartHandshake, FileText, Circle, ChevronDown, CircleAlert, Wand2, Pencil, X } from 'lucide-react';
 import { displaySkill } from '@shared/match.js';
 import { useApp } from '../lib/store.jsx';
+import { createProfile, renameProfile, deleteProfile, DEFAULT_PROFILE_ID } from '../lib/profiles.js';
 import { Button, Field, TagInput, MultiChips, Seg, Switch, ScoreRing } from '../components/ui.jsx';
 import { profileSchema as schema, withDefaults, sectionCompletion, profileCompletion } from '../lib/profile.js';
 
@@ -75,9 +76,77 @@ function SectionForm({ section, values, set, app }) {
   );
 }
 
+/** Profile page: the list of profiles (the default one plus any others) and the form of the selected one. */
 export default function Profile() {
   const app = useApp();
-  const [values, setValues] = useState(() => withDefaults(app.profile));
+  const [selId, setSelId] = useState(DEFAULT_PROFILE_ID);
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const profiles = app.profiles;
+  const sel = profiles.find((p) => p.id === selId) || profiles[0];
+  const add = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const id = await createProfile(app, label);
+      setSelId(id); setLabel(''); setAdding(false);
+      app.toast('Profile added. Fill in its details below.', 'success');
+    } catch (err) { app.toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="col" style={{ gap: 14 }}>
+      <div className="col" style={{ gap: 8 }} data-testid="profile-switcher">
+        <div className="row between small" style={{ minHeight: 24 }}>
+          <span className="muted">Profiles</span>
+          <span className="tiny dim">Each one has its own details and resumes</span>
+        </div>
+        <div className="card list">
+          {profiles.map((p) => {
+            const own = app.resumes.filter((r) => r.profileId === p.id).length;
+            return (
+              <button key={p.id} type="button" className="list-row" onClick={() => setSelId(p.id)} aria-current={p.id === sel.id ? 'true' : undefined} data-profile={p.id}>
+                <span className="ico"><User size={16} /></span>
+                <span className="grow"><span style={{ display: 'block', fontWeight: 600 }}>{p.label}</span><span className="tiny dim">{p.isDefault ? 'Default profile' : `${own} resume${own === 1 ? '' : 's'} of its own`}</span></span>
+                {p.isDefault && <span className="badge accent">Default</span>}
+                {p.id === sel.id && <Check size={15} color="var(--green)" />}
+              </button>
+            );
+          })}
+        </div>
+        {adding ? (
+          <form className="card pad row" style={{ gap: 6 }} onSubmit={add} data-testid="profile-add">
+            <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Name, e.g. Brother" aria-label="New profile name" autoFocus data-testid="profile-name" />
+            <Button type="submit" variant="primary" icon={Check} loading={busy} disabled={!label.trim()} aria-label="Add profile" />
+            <Button icon={X} aria-label="Cancel" onClick={() => { setAdding(false); setLabel(''); }} />
+          </form>
+        ) : (
+          <Button icon={Plus} block onClick={() => setAdding(true)} data-testid="profile-new">New profile</Button>
+        )}
+      </div>
+      <ProfileEditor key={sel.id} profile={sel} onDeleted={() => setSelId(DEFAULT_PROFILE_ID)} />
+    </div>
+  );
+}
+
+/** The details form of one profile (autosaves). `profile` = { id, label, values, isDefault }. */
+function ProfileEditor({ profile, onDeleted }) {
+  const app = useApp();
+  const [values, setValues] = useState(() => withDefaults(profile.values));
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(profile.label);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const rename = async (e) => {
+    e.preventDefault();
+    setRenameBusy(true);
+    try { await renameProfile(app, profile.id, name); setRenaming(false); app.toast('Renamed', 'success'); }
+    catch (err) { app.toast(err.message, 'error'); } finally { setRenameBusy(false); }
+  };
+  const del = async () => {
+    if (!(await app.confirm({ title: 'Delete profile?', message: `"${profile.label}" and its details are removed from every device. Its resumes and applications stay, and campaigns that used it move to your default profile.`, confirmLabel: 'Delete profile' }))) return;
+    try { await deleteProfile(app, profile.id); app.toast('Profile deleted', 'success'); onDeleted(); }
+    catch (err) { app.toast(err.message, 'error'); }
+  };
   const [open, setOpen] = useState('personal');
   const [saveState, setSaveState] = useState('saved');
   const timer = useRef(null);
@@ -88,7 +157,7 @@ export default function Profile() {
   const persist = async () => {
     timer.current = null;
     setSaveState('saving');
-    try { await app.saveProfile(latest.current); setSaveState((s) => (s === 'saving' ? 'saved' : s)); } catch (e) { setSaveState('error'); app.toast(`Profile not saved: ${e.message}`, 'error'); }
+    try { await app.saveProfileTo(profile.id, latest.current); setSaveState((s) => (s === 'saving' ? 'saved' : s)); } catch (e) { setSaveState('error'); app.toast(`Profile not saved: ${e.message}`, 'error'); }
   };
   const set = (k, v) => {
     setValues((cur) => { const next = { ...cur, [k]: v }; latest.current = next; return next; });
@@ -101,9 +170,9 @@ export default function Profile() {
   // Pick up changes synced from another device while we're idle.
   useEffect(() => {
     if (stateRef.current !== 'saved') return;
-    const remote = withDefaults(app.profile);
+    const remote = withDefaults(profile.values);
     if (JSON.stringify(remote) !== JSON.stringify(latest.current)) { latest.current = remote; setValues(remote); }
-  }, [app.profile]);
+  }, [profile.values]);
 
   const pct = useMemo(() => profileCompletion(values), [values]);
   const resume = app.resumes.find((r) => r.isDefault) || app.resumes[0];
@@ -117,12 +186,24 @@ export default function Profile() {
 
   return (
     <div className="col" style={{ gap: 14 }}>
-      <div className="card pad row" style={{ gap: 14 }}>
+      <div className="card pad row" style={{ gap: 14 }} data-testid="profile-header">
         <ScoreRing score={pct} size={56} stroke={5} />
         <div className="grow">
-          <div style={{ fontWeight: 700 }}>Fill this once</div>
-          <div className="small muted">Used for quick-fill on your phone and by the desktop app. Encrypted on this device.</div>
+          {renaming ? (
+            <form className="row" style={{ gap: 6 }} onSubmit={rename}>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus aria-label="Profile name" data-testid="profile-rename-input" />
+              <Button type="submit" variant="primary" icon={Check} loading={renameBusy} disabled={!name.trim()} aria-label="Save name" />
+              <Button icon={X} aria-label="Cancel rename" onClick={() => { setName(profile.label); setRenaming(false); }} />
+            </form>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700 }} data-testid="profile-label">{profile.label}{profile.isDefault && <span className="badge accent" style={{ marginLeft: 8 }}>Default</span>}</div>
+              <div className="small muted">Used for quick-fill on your phone and by the desktop app. Encrypted on this device.</div>
+            </>
+          )}
         </div>
+        {!renaming && <Button size="sm" variant="ghost" icon={Pencil} aria-label="Rename profile" onClick={() => { setName(profile.label); setRenaming(true); }} data-testid="profile-rename" />}
+        {!profile.isDefault && !renaming && <Button size="sm" variant="ghost" icon={Trash2} aria-label="Delete profile" onClick={del} data-testid="profile-delete" />}
       </div>
       <div className="row between small" style={{ minHeight: 24 }} data-testid="save-state" data-state={saveState}>
         <span className="muted row" style={{ gap: 6 }}>

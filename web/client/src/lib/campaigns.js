@@ -12,6 +12,7 @@ import { newId } from '@shared/vaultCrypto.js';
 import { campaignQueries, selectMatches } from '@shared/campaignRules.js';
 import { api } from './api.js';
 import { newApplication } from './apply.js';
+import { getProfile, pickResumeFor, resumePool, profileIdOf, DEFAULT_PROFILE_ID } from './profiles.js';
 import { rememberJobs } from './insights.js';
 import { nat, notify } from './bridge.js';
 
@@ -27,7 +28,7 @@ export const intervalLabel = (m) => (m < 60 ? `${m} minutes` : m === 1440 ? 'day
 export function blankCampaign(app) {
   const p = app.profile || {};
   return {
-    name: '', roles: [], locations: (p.preferredLocations || []).slice(0, 3), remote: 'any', resumeId: 'auto', mode: 'queue',
+    name: '', roles: [], locations: (p.preferredLocations || []).slice(0, 3), remote: 'any', resumeId: 'auto', profileId: DEFAULT_PROFILE_ID, mode: 'queue',
     minScore: Number(app.settings.minMatchScore) || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', tailorResume: false,
     includeKeywords: [], excludeKeywords: [], excludeCompanies: [], sources: [], runOn: 'both',
   };
@@ -60,6 +61,7 @@ export async function saveCampaign(app, c) {
     ...(cur || {}),
     ...c,
     id, roles, name: (c.name || '').trim() || roles[0],
+    profileId: c.profileId || (cur && cur.profileId) || DEFAULT_PROFILE_ID,
     minScore: Math.max(0, Math.min(100, Number(c.minScore) || 55)),
     dailyLimit: Math.max(1, Math.min(200, Number(c.dailyLimit) || 25)),
     intervalMinutes: Math.max(15, Number(c.intervalMinutes) || 60),
@@ -134,11 +136,14 @@ export async function runCampaign(app, c, { signal } = {}) {
 
     setRt(c.id, { phase: 'scoring' });
     const latest = sync.get('campaigns', c.id) || c;
-    const applications = sync.list('applications');
+    // The campaign's profile: its details score the jobs, its resumes are used, and only its own
+    // applications count for the duplicate guard (two profiles may apply to the same job).
+    const who = getProfile(app, latest.profileId);
+    const applications = sync.list('applications').filter((a) => profileIdOf(a) === who.id);
     const settings = sync.get('settings', 'main') || {};
     const { fresh, toQueue, stats } = selectMatches(latest, jobs, {
-      profile: (sync.get('profile', 'main') || {}).values || {},
-      resumes: sync.list('resumes'),
+      profile: who.values || {},
+      resumes: resumePool(app, who.id).all,
       applications,
       minMatchScore: Number(settings.minMatchScore) || 55,
     });
@@ -149,9 +154,10 @@ export async function runCampaign(app, c, { signal } = {}) {
 
     setRt(c.id, { phase: 'queueing' });
     let queued = 0;
-    for (const { job, match, resume } of toQueue) {
+    for (const { job, match } of toQueue) {
       if (signal && signal.aborted) break;
-      const rec = newApplication(job, { status: 'queued', resume, match, campaign: latest, message: `Matched by "${latest.name}" (${match.score}%)` });
+      const resume = pickResumeFor(app, job, latest.resumeId, who.id);
+      const rec = newApplication(job, { status: 'queued', resume, match, campaign: latest, profile: who, message: `Matched by "${latest.name}" (${match.score}%)` });
       await app.put('applications', rec.id, rec);
       queued++;
     }
@@ -199,8 +205,14 @@ export async function tick(app) {
   const due = dueCampaigns(app.sync.list('campaigns'), Date.now(), force);
   if (!due.length) return;
   schedulerBusy = true;
+  // One lane per profile: campaigns for different people run in parallel; campaigns for the same profile run
+  // one after another so the duplicate guard always sees the applications the previous one just queued.
+  const lanes = new Map();
+  for (const c of due) { const k = profileIdOf(c); lanes.set(k, [...(lanes.get(k) || []), c]); }
   try {
-    for (const c of due) { try { await runCampaign(app, c); } catch { /* recorded on the campaign */ } }
+    await Promise.all([...lanes.values()].map(async (list) => {
+      for (const c of list) { try { await runCampaign(app, c); } catch { /* recorded on the campaign */ } }
+    }));
   } finally { schedulerBusy = false; }
 }
 export function resetRuntime() { runtime.clear(); sessionSeen.clear(); emit(); }

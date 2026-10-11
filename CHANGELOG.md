@@ -2,6 +2,26 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0] — 2026-10-11
+
+### Added
+- **Several profiles** (for example "Me" and a family member). Each profile has its own details and resumes. Campaigns and applications belong to one profile, and campaigns for different profiles run in parallel. Duplicate checks are per profile, so two people can apply to the same job.
+- **Resume per profile.** A resume belongs to one profile or is shared with all. Pick the owner on the Resumes page.
+- **Check before applying** (phone and web). Before "Send to my PC", the sheet shows what will be filled from the chosen profile, asks for anything missing and saves it to that profile, lets you choose the resume, and sends only after you confirm.
+- **Browser extension fills from your profile.** The page check lists what will be filled and what is missing. It fills only after you confirm, never submits, and attaches the resume only when you ask for it. The desktop bridge returns the profile of the tracked application for the job's URL.
+
+### Changed
+- Job actions depend on the device. In the phone app: "Apply in app" and "Send to my PC". In a browser: "Send to my PC" and "Open job page". "Apply on this phone" no longer appears on a laptop.
+- The desktop applies each queued job with the profile and resume that were sent with it.
+- Review queue: the "Needs you" list shows the first 100 items.
+
+### Fixed
+- Workable open/closed check and company-name handling (see 1.4.2).
+
+### Tests
+- Desktop e2e 71/71 (after the stress test's Needs-you cap and the Answer-bank delete locator update).
+- Feature units 18/18, web server tests 110 passing (1 live test skipped).
+
 ## [1.4.2] — 2026-10-11
 
 ### Fixed

@@ -23,8 +23,8 @@ export default function More() {
   return (
     <div className="col" style={{ gap: 14 }}>
       <div className="card pad row" style={{ gap: 12 }}>
-        <Logo name={u.name || u.email || '?'} />
-        <div className="grow"><div style={{ fontWeight: 700 }} className="ellipsis">{u.name || 'Signed in'}</div><div className="small muted ellipsis">{u.email}</div></div>
+        <Logo name={u.displayName || 'You'} />
+        <div className="grow"><div style={{ fontWeight: 700 }} className="ellipsis">{u.displayName || 'Your portal'}</div><div className="small muted">Change your name in Settings</div></div>
         <span className="badge green"><ShieldCheck size={11} />Unlocked</span>
       </div>
       <div className="card list">

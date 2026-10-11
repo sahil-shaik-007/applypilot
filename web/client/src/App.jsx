@@ -6,7 +6,7 @@ import { Toasts, ConfirmSheet, Button } from './components/ui.jsx';
 import { Brand, Mark } from './components/Brand.jsx';
 import { ApplyHost, CampaignScheduler } from './components/apply.jsx';
 import Landing from './pages/Landing.jsx';
-import { CreateVault, Unlock } from './pages/Vault.jsx';
+import { CreateVault, Unlock, AskName } from './pages/Vault.jsx';
 import Home from './pages/Home.jsx';
 import Jobs from './pages/Jobs.jsx';
 import Applied from './pages/Applied.jsx';
@@ -99,6 +99,7 @@ function Screens() {
     case 'landing': return <Landing />;
     case 'create-vault': return <CreateVault />;
     case 'unlock': return <Unlock />;
+    case 'name': return <AskName />;
     default: return <Shell />;
   }
 }

@@ -46,6 +46,15 @@ class CampaignManager {
 
   // ---------- helpers ----------
   profile() { return this.store.profile.get().values || {}; }
+  // Values of the profile an application or campaign belongs to (no id = the main profile).
+  profileValues(profileId) { return this.store.resolveProfile(profileId).values || {}; }
+  // Resume for an application. A resume the user picked (even one tagged for another profile) always wins;
+  // otherwise choose among the resumes shared with, or tagged for, this profile.
+  resumeFor(profileId, { resumeId, job } = {}) {
+    if (resumeId && resumeId !== 'auto' && this.store.resumes.get().items.some((r) => r.id === resumeId)) return pickResume(this.store, { resumeId, job });
+    const items = this.store.resumesFor(profileId);
+    return pickResume({ resumes: { get: () => ({ items }) } }, { job });
+  }
   settings() { return this.store.settings.get(); }
   campaign(id) { return this.store.campaigns.get().items.find((c) => c.id === id); }
   patchCampaign(id, patch) {
@@ -80,12 +89,15 @@ class CampaignManager {
   }
   // Duplicate guard + per-company cap (max 2 applications to one company per 30 days) so parallel
   // campaigns never spam the same recruiter.
-  alreadyHandled(job) {
+  // Each profile applies on its own behalf, so the guard only looks at that profile's applications.
+  alreadyHandled(job, profileId) {
+    const pid = profileId || 'main';
     const co = (job.company || '').toLowerCase().trim();
     const key = `${co}|${(job.title || '').toLowerCase()}`;
     const since = Date.now() - 30 * 86400000;
     let sameCompany = 0;
     for (const a of this.store.applications.get().items) {
+      if ((a.profileId || 'main') !== pid) continue;
       const aco = (a.job.company || '').toLowerCase().trim();
       if (a.jobId === job.id || `${aco}|${(a.job.title || '').toLowerCase()}` === key) return true;
       if (co && aco === co && a.status !== 'skipped' && new Date(a.createdAt).getTime() > since) sameCompany++;
@@ -154,8 +166,13 @@ class CampaignManager {
   // ---------- one pass ----------
   async search(c, onProgress) {
     const s = this.settings();
-    const roles = (c.roles || []).filter(Boolean);
-    const locations = (c.locations && c.locations.length ? c.locations : ['']).slice(0, 3);
+    // A campaign for a specific profile falls back to that profile's target titles and preferred locations when it has none of its own.
+    const own = c.profileId ? this.profileValues(c.profileId) : {};
+    let roles = (c.roles || []).filter(Boolean);
+    if (!roles.length && c.profileId) roles = (own.desiredTitles || []).filter(Boolean);
+    let locs = c.locations && c.locations.length ? c.locations : null;
+    if (!locs && c.profileId && (own.preferredLocations || []).length) locs = own.preferredLocations;
+    const locations = (locs || ['']).slice(0, 3);
     const merged = new Map();
     const stats = [];
     for (const role of roles) {
@@ -172,7 +189,7 @@ class CampaignManager {
   }
 
   async runOnce(c, signal) {
-    const profile = this.profile();
+    const profile = this.profileValues(c.profileId);
     this.patchCampaign(c.id, { phase: 'searching', lastRunAt: new Date().toISOString(), lastError: null, progress: { sources: 0, found: 0 } });
     let srcDone = 0; let foundSoFar = 0;
     const { jobs, stats } = await this.search(c, (p) => {
@@ -188,7 +205,7 @@ class CampaignManager {
     await this.sweepClosed(c, signal).catch(() => {});
     const include = (c.includeKeywords || []).map((k) => k.toLowerCase());
     for (const job of jobs) {
-      if (this.alreadyHandled(job)) continue;
+      if (this.alreadyHandled(job, c.profileId)) continue;
       // Never apply at the company you work for today.
       if (isCurrentEmployer(job, profile)) { skipped++; employerSkipped++; continue; }
       // Country / posted-date / month filters chosen on the campaign.
@@ -196,7 +213,7 @@ class CampaignManager {
       const excluded = isExcluded(job, { profile, campaign: c });
       if (excluded) { skipped++; continue; }
       if (include.length && !include.some((k) => `${job.title} ${job.description}`.toLowerCase().includes(k))) { skipped++; continue; }
-      const resume = pickResume(this.store, { resumeId: c.resumeId, job });
+      const resume = this.resumeFor(c.profileId, { resumeId: c.resumeId, job });
       const match = scoreJob(job, { resumeText: resume ? resume.text : '', profile, campaign: c });
       fresh.push({ job, match, resume });
     }
@@ -273,13 +290,16 @@ class CampaignManager {
     return closed;
   }
 
-  createApplication({ job, match, resume, campaign, status = 'queued' }) {
+  // profile (optional) is a snapshot { label, values } that the application uses instead of the synced profile.
+  createApplication({ job, match, resume, campaign, status = 'queued', profileId, profile }) {
     const app = {
       id: crypto.randomUUID(),
       jobId: job.id,
       job: { title: job.title, company: job.company, companyLogo: job.companyLogo, location: job.location, remote: job.remote, url: job.url, applyUrl: job.applyUrl, source: job.source, ats: job.ats, atsMeta: job.atsMeta, salaryText: job.salaryText, salaryMin: job.salaryMin, salaryMax: job.salaryMax, salaryCurrency: job.salaryCurrency, description: (job.description || '').slice(0, 6000), postedAt: job.postedAt },
       campaignId: campaign ? campaign.id : null,
       campaignName: campaign ? campaign.name : 'Manual',
+      profileId: profileId || (campaign && campaign.profileId) || null,
+      ...(profile ? { profile } : {}),
       resumeId: resume ? resume.id : null,
       resumeName: resume ? resume.name : null,
       score: match ? match.score : null,
@@ -310,7 +330,10 @@ class CampaignManager {
 
   // Q&A memory first, then AI, otherwise remember the question so the user can answer it once for next time.
   async answerQuestion(question, info, ctx) {
-    const items = this.store.qa.get().items;
+    const all = this.store.qa.get().items;
+    // Answers the AI wrote from one profile are reused only for that profile; answers typed in the bank are shared.
+    const pid = (ctx && ctx.profileId) || 'main';
+    const items = all.filter((q) => !q.profileId || q.profileId === pid);
     let best = null; let bestSim = 0;
     for (const q of items) {
       if (!q.answer) continue;
@@ -327,7 +350,7 @@ class CampaignManager {
         const ans = await this.ai.answerQuestion({ ...this.aiArgs(), question, options: info.options, type: info.type, job: ctx.job, profile: ctx.profile, resumeText: ctx.resume ? ctx.resume.text : '' });
         if (ans) {
           if (!info.options || !info.options.length) {
-            this.store.qa.update((d) => { d.items.unshift({ id: crypto.randomUUID(), question, answer: Array.isArray(ans) ? ans.join(', ') : ans, source: 'ai', uses: 1, updatedAt: new Date().toISOString() }); });
+            this.store.qa.update((d) => { d.items.unshift({ id: crypto.randomUUID(), question, answer: Array.isArray(ans) ? ans.join(', ') : ans, source: 'ai', profileId: pid, uses: 1, updatedAt: new Date().toISOString() }); });
           }
           return ans;
         }
@@ -336,11 +359,30 @@ class CampaignManager {
     // Remember real screening questions for the user to answer once — but not empty optional
     // one-word fields like "Twitter" or "Other website".
     const worthAsking = info.required || question.trim().split(/\s+/).length >= 4;
-    if (worthAsking && !items.some((q) => similarity(q.question, question) >= 0.85)) {
+    if (worthAsking && !all.some((q) => similarity(q.question, question) >= 0.85)) {
       this.store.qa.update((d) => { d.items.unshift({ id: crypto.randomUUID(), question, answer: '', options: info.options || [], source: 'pending', uses: 0, updatedAt: new Date().toISOString() }); });
       this.emit('qa:pending', { question });
     }
     return null;
+  }
+
+  // Every question an application is left with goes into the Answer bank too (once), so the bank's
+  // "Needs answer" list and the Review queue card agree. File fields are not text questions, so they are skipped.
+  rememberOpenQuestions(list = []) {
+    const items = this.store.qa.get().items;
+    const fresh = [];
+    for (const u of list || []) {
+      const question = String((u && u.question) || '').trim();
+      if (!question || /\b(resume|cv|cover letter|upload|attach)\b/i.test(question)) continue;
+      if (!(u.required || question.split(/\s+/).length >= 4)) continue;
+      const dup = (q) => similarity(q.question, question) >= 0.85;
+      if (items.some(dup) || fresh.some(dup)) continue;
+      fresh.push({ id: crypto.randomUUID(), question, answer: '', options: [], source: 'pending', uses: 0, updatedAt: new Date().toISOString() });
+    }
+    if (!fresh.length) return 0;
+    this.store.qa.update((d) => { d.items.unshift(...fresh); });
+    this.emit('qa:pending', { count: fresh.length });
+    return fresh.length;
   }
 
   async applyApplication(appId, { mode, signal, force = false } = {}) {
@@ -353,10 +395,14 @@ class CampaignManager {
       this.patchApp(appId, {}, { type: 'limit', message: `Daily limit of ${plan.dailyApplies} reached on the ${plan.label} plan` });
       return;
     }
-    const profile = this.profile();
     const campaign = app.campaignId ? this.campaign(app.campaignId) : null;
+    // This application's own profile: the snapshot a phone job carried, else the profile it was queued for (main by default).
+    const owned = app.profile && app.profile.values
+      ? { id: app.profileId || 'main', label: app.profile.label || 'Profile', values: app.profile.values }
+      : this.store.resolveProfile(app.profileId || (campaign && campaign.profileId));
+    const profile = owned.values;
     const job = { ...(this.store.jobs.get().items[app.jobId] || {}), ...app.job, id: app.jobId };
-    const resume = pickResume(this.store, { resumeId: app.resumeId || (campaign && campaign.resumeId), job });
+    const resume = this.resumeFor(owned.id, { resumeId: app.resumeId || (campaign && campaign.resumeId), job });
     if (!resume) { this.patchApp(appId, { status: 'failed' }, { type: 'error', message: 'Upload a resume first' }); return; }
     // Don't waste an application on a posting that has already closed.
     const open = await require('./liveness').isStillOpen(job).catch(() => null);
@@ -375,7 +421,7 @@ class CampaignManager {
     const onCampaignAbort = () => ac.abort();
     if (signal) signal.addEventListener('abort', onCampaignAbort, { once: true });
     this.applying.set(appId, ac);
-    this.patchApp(appId, { status: 'in-progress', attemptedAt: new Date().toISOString(), resumeId: resume.id, resumeName: resume.name }, { type: 'step', message: 'Preparing application' });
+    this.patchApp(appId, { status: 'in-progress', attemptedAt: new Date().toISOString(), resumeId: resume.id, resumeName: resume.name }, { type: 'step', message: owned.id !== 'main' ? `Preparing application for ${owned.label}` : 'Preparing application' });
 
     const finalize = (result) => {
       const cur = this.store.applications.get().items.find((a) => a.id === appId);
@@ -394,6 +440,7 @@ class CampaignManager {
         this.log('applied', `Applied: ${job.title} at ${job.company}`, { applicationId: appId, campaignId: app.campaignId });
         this.notify('Application submitted', `${job.title} at ${job.company}`);
       } else if (status === 'awaiting-you') {
+        this.rememberOpenQuestions(result.unanswered || cur.unanswered || []);
         if (!wasAwaiting) {
           this.log('review', `Needs you: ${job.title} at ${job.company} — ${result.message || 'review & submit'}`, { applicationId: appId });
           this.notify('Application needs your review', `${job.title} at ${job.company}`);
@@ -436,13 +483,15 @@ class CampaignManager {
         coverLetterText,
         mode: effectiveMode,
         signal: ac.signal,
-        answerQuestion: (q, info) => this.answerQuestion(q, info || {}, { job, profile, resume }),
+        answerQuestion: (q, info) => this.answerQuestion(q, info || {}, { job, profile, resume, profileId: owned.id }),
         beforeSubmit: () => this.cancelWindow(appId, job),
         onEvent: (ev) => {
           if (ev.type === 'needs-user') {
             if (signal) signal.removeEventListener('abort', onCampaignAbort); // pausing a campaign never closes your tab
             const cur = this.store.applications.get().items.find((a) => a.id === appId);
-            this.patchApp(appId, { status: 'awaiting-you', unanswered: (ev.data && ev.data.unanswered) || (cur && cur.unanswered) || [] }, { type: ev.type, message: ev.message });
+            const open = (ev.data && ev.data.unanswered) || (cur && cur.unanswered) || [];
+            this.patchApp(appId, { status: 'awaiting-you', unanswered: open }, { type: ev.type, message: ev.message });
+            this.rememberOpenQuestions(open);
             this.log('review', `Needs you: ${job.title} at ${job.company} — ${ev.message}`, { applicationId: appId });
             this.notify('Application ready for your review', `${job.title} at ${job.company}`);
             handOff();

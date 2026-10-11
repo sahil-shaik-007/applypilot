@@ -12,7 +12,7 @@ const { pathToFileURL } = require('url');
 let vcPromise = null;
 const vc = () => (vcPromise ||= import(pathToFileURL(path.join(__dirname, '..', 'web', 'shared', 'vaultCrypto.js')).href));
 
-const COLLECTIONS = ['profile', 'resumes', 'applications', 'qa', 'outbox', 'savedJobs'];
+const COLLECTIONS = ['profile', 'profiles', 'resumes', 'applications', 'qa', 'outbox', 'savedJobs'];
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 class CloudSync {
@@ -157,6 +157,10 @@ class CloudSync {
       const p = this.store.profile.get();
       return p.updatedAt ? { values: p.values, _updatedAt: Date.parse(p.updatedAt) } : null;
     }
+    if (collection === 'profiles') {
+      const p = this.store.profiles.get().items.find((x) => x.id === id);
+      return p ? { id: p.id, label: p.label || '', values: p.values || {}, createdAt: p.createdAt || null, updatedAt: p.updatedAt || null } : null;
+    }
     if (collection === 'qa') {
       const q = this.store.qa.get().items.find((x) => x.id === id);
       return q ? { ...q, _updatedAt: Date.parse(q.updatedAt || 0) || 0 } : null;
@@ -184,6 +188,7 @@ class CloudSync {
   async push(stats) {
     const profilePlain = this.localPlain('profile', 'main');
     if (profilePlain) await this.putRecord('profile', 'main', profilePlain, stats);
+    for (const p of this.store.profiles.get().items) await this.putRecord('profiles', p.id, this.localPlain('profiles', p.id), stats);
     for (const q of this.store.qa.get().items) await this.putRecord('qa', q.id, this.localPlain('qa', q.id), stats);
     const cutoff = Date.now() - 90 * 86400000;
     const apps = this.store.applications.get().items.filter((a) => Date.parse(a.updatedAt || a.createdAt) > cutoff).slice(0, 600);
@@ -196,7 +201,7 @@ class CloudSync {
         await this.api('PUT', `/api/blobs/${blobId}`, { body: Buffer.from(bytes) });
         this.store.cloud.update((c) => { c.pushed = { ...(c.pushed || {}), [`blob/${blobId}`]: 'y' }; });
       }
-      await this.putRecord('resumes', r.id, { id: r.id, name: r.name, fileName: r.fileName, ext: r.ext, size: r.size, text: (r.text || '').slice(0, 40000), skills: r.skills, roles: r.roles || [], isDefault: !!r.isDefault, blobId, hash: r.hash, createdAt: r.createdAt, _updatedAt: Date.parse(r.createdAt) || 0 }, stats);
+      await this.putRecord('resumes', r.id, { id: r.id, name: r.name, fileName: r.fileName, ext: r.ext, size: r.size, text: (r.text || '').slice(0, 40000), skills: r.skills, roles: r.roles || [], isDefault: !!r.isDefault, profileId: r.profileId || null, blobId, hash: r.hash, createdAt: r.createdAt, _updatedAt: Date.parse(r.createdAt) || 0 }, stats);
     }
   }
 
@@ -215,7 +220,7 @@ class CloudSync {
       const ts = v._updatedAt || it.updatedAt || Date.now();
       const c = it.collection;
       if (c === 'outbox') { await this.takeFromOutbox(it, v); stats.fromPhone++; continue; }
-      if (['profile', 'qa', 'applications'].includes(c)) {
+      if (['profile', 'profiles', 'qa', 'applications'].includes(c)) {
         const local = this.localPlain(c, it.id);
         if (local && sha(JSON.stringify(local)) === sha(JSON.stringify(v))) { this.markSynced(c, it.id); continue; } // our own echo
         if (this.isDirty(c, it.id)) continue; // local edits win; push() sends them next
@@ -223,6 +228,15 @@ class CloudSync {
       if (c === 'profile' && it.id === 'main') {
         this.store.profile.set({ values: v.values || {}, updatedAt: new Date(ts).toISOString() });
         this.emit('profile:changed', true);
+        this.markSynced(c, it.id);
+      } else if (c === 'profiles') {
+        // Extra profiles (e.g. a brother's) are only added or updated here; a profile deleted on the phone stays on this PC.
+        const rec = { ...stripMeta(v, ts), id: it.id, label: v.label || 'Profile', values: v.values || {} };
+        this.store.profiles.update((d) => {
+          const cur = d.items.find((p) => p.id === it.id);
+          if (!cur) d.items.push(rec); else Object.assign(cur, rec);
+        });
+        this.emit('profiles:changed', true);
         this.markSynced(c, it.id);
       } else if (c === 'qa') {
         this.store.qa.update((d) => {
@@ -252,27 +266,43 @@ class CloudSync {
 
   async pullResume(v) {
     const local = this.store.resumes.get().items;
-    if (local.some((r) => r.id === v.id || (v.hash && r.hash === v.hash))) return;
+    const same = local.find((r) => r.id === v.id);
+    if (same) {
+      // Already have the file; only the profile it is tagged for can change on the phone.
+      const pid = v.profileId || null;
+      if ((same.profileId || null) !== pid) this.store.resumes.update((d) => { const r = d.items.find((x) => x.id === v.id); if (r) r.profileId = pid; });
+      return;
+    }
+    if (v.hash && local.some((r) => r.hash === v.hash)) return;
     const res = await this.api('GET', `/api/blobs/${v.blobId}`, { raw: true });
     if (!res.ok) return;
     const { decryptBytes, aadFor } = await vc();
     const bytes = await decryptBytes(await this.key(), new Uint8Array(await res.arrayBuffer()), aadFor(this.s.userId, 'blob', v.blobId));
     const dest = path.join(this.store.resumesDir, `${v.id}${v.ext || '.pdf'}`);
     fs.writeFileSync(dest, Buffer.from(bytes));
-    this.store.resumes.update((d) => { d.items.push({ id: v.id, name: v.name, fileName: v.fileName, path: dest, hash: v.hash || sha(Buffer.from(bytes)), ext: v.ext, size: bytes.length, text: v.text || '', skills: v.skills || [], roles: v.roles || [], isDefault: !d.items.length, createdAt: v.createdAt || new Date().toISOString(), stats: { applied: 0, responses: 0, interviews: 0 }, parserVersion: 2 }); });
+    this.store.resumes.update((d) => { d.items.push({ id: v.id, name: v.name, fileName: v.fileName, path: dest, hash: v.hash || sha(Buffer.from(bytes)), ext: v.ext, size: bytes.length, text: v.text || '', skills: v.skills || [], roles: v.roles || [], profileId: v.profileId || null, isDefault: !d.items.length, createdAt: v.createdAt || new Date().toISOString(), stats: { applied: 0, responses: 0, interviews: 0 }, parserVersion: 2 }); });
     this.emit('resumes:changed', [v.id]);
   }
 
   // A job sent from the phone: queue it (and start filling it if the user asked for that).
+  // Outbox item fields read here: jobId, job (snapshot), resumeId, mode ('auto' or review), profileId and
+  // profile { label, values } (the phone's snapshot of the profile this job is for; absent for the main profile).
   async takeFromOutbox(it, v) {
-    const { pickResume } = require('./resume');
     const { scoreJob } = require('./match');
     const job = { ...(v.job || {}), id: v.jobId || (v.job && v.job.id) };
-    if (job.title && !this.store.applications.get().items.some((a) => a.jobId === job.id)) {
-      const resume = pickResume(this.store, { resumeId: v.resumeId, job });
-      const match = scoreJob(job, { resumeText: resume ? resume.text : '', profile: this.store.profile.get().values || {} });
-      const app = this.manager.createApplication({ job, match, resume, campaign: null, status: 'queued' });
-      this.manager.patchApp(app.id, { campaignName: 'Sent from phone' }, { type: 'step', message: 'Sent from your phone' });
+    // Snapshot sent with the job wins; otherwise the synced profiles record; otherwise the main profile.
+    const snap = v.profile && v.profile.values && typeof v.profile.values === 'object' ? v.profile : null;
+    const profile = snap ? { id: v.profileId || 'main', label: snap.label || 'Profile', values: snap.values } : this.store.resolveProfile(v.profileId);
+    const dup = this.store.applications.get().items.some((a) => a.jobId === job.id && (a.profileId || 'main') === profile.id);
+    if (job.title && !dup) {
+      const resume = this.manager.resumeFor(profile.id, { resumeId: v.resumeId, job });
+      const match = scoreJob(job, { resumeText: resume ? resume.text : '', profile: profile.values });
+      const app = this.manager.createApplication({ job, match, resume, campaign: null, status: 'queued', profileId: profile.id, profile: snap ? { label: profile.label, values: profile.values } : null });
+      this.manager.patchApp(app.id, { campaignName: 'Sent from phone' }, { type: 'step', message: `Sent from your phone${profile.id !== 'main' ? ` for ${profile.label}` : ''}` });
+      if (resume && resume.profileId && resume.profileId !== profile.id) {
+        // The resume was chosen on the phone even though it is tagged for another profile: allowed, but say so.
+        this.manager.patchApp(app.id, {}, { type: 'warn', message: `"${resume.name || resume.fileName}" is tagged for a different profile than this application (${profile.label})` });
+      }
       // "auto" = apply now on autopilot (cancel window, scam and still-open checks still apply);
       // anything else waits in the Review queue so pre-filled tabs don't pile up while you're away.
       const auto = v.mode === 'auto';

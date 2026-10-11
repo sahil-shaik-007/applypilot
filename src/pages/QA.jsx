@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquareText, Trash2, Plus, Bot, User, CircleHelp } from 'lucide-react';
+import { MessageSquareText, Trash2, Plus, Bot, User, CircleHelp, Eraser } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Seg, Empty, timeAgo } from '../components/ui';
 
@@ -22,6 +22,8 @@ function QARow({ q }) {
   const [answer, setAnswer] = useState(q.answer || '');
   const save = async (val = answer) => { if (val === (q.answer || '')) return; app.set({ qa: await app.run('qa:save', [{ ...q, answer: val }], 'Answer saved — used automatically from now on') }); };
   const del = async () => app.set({ qa: await app.run('qa:delete', [q.id]) });
+  // Removes the saved answer but keeps the question: it goes back to "Needs answer" (and to the Review queue card).
+  const clear = async () => { setAnswer(''); app.set({ qa: await app.run('qa:save', [{ id: q.id, question: q.question, answer: '' }], 'Answer cleared — the question is open again') }); };
   const src = q.source === 'ai' ? { icon: Bot, label: 'AI answered', cls: 'accent' } : q.source === 'pending' ? { icon: CircleHelp, label: 'Needs answer', cls: 'amber' } : { icon: User, label: 'You', cls: 'green' };
   return (
     <motion.div layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 30 }} className="card pad" style={!q.answer ? { borderColor: 'rgba(251,191,36,.35)' } : null}>
@@ -43,7 +45,10 @@ function QARow({ q }) {
           <textarea className="textarea" rows={answer.length > 120 ? 4 : 2} value={answer} placeholder="Type your answer once — ApplyPilot reuses it on every form that asks this." onChange={(e) => setAnswer(e.target.value)} onBlur={() => save()} />
         )}
       </div>
-      <div className="tiny dim" style={{ marginTop: 6 }}>Updated {timeAgo(q.updatedAt)}</div>
+      <div className="row between" style={{ marginTop: 6 }}>
+        <div className="tiny dim">Updated {timeAgo(q.updatedAt)}</div>
+        {q.answer && <Button size="sm" variant="ghost" icon={Eraser} onClick={clear}>Clear answer</Button>}
+      </div>
     </motion.div>
   );
 }

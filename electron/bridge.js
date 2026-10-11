@@ -288,14 +288,23 @@ async function startBridge(opts = {}) {
     },
     'GET /autofill-data': (ctx) => {
       const q = { get: (k) => ctx.param(k) };
-      const profile = getProfile() || {};
+      // The tracked application for this job (matched by its apply/listing URL) decides whose profile is used.
+      const canon = (u) => String(u || '').trim().toLowerCase().replace(/[?#].*$/, '').replace(/\/+$/, '');
+      const wantUrl = canon(q.get('url'));
+      const apps = store.applications.get().items || [];
+      const app = wantUrl ? apps.find((a) => a.job && [a.job.applyUrl, a.job.url].some((u) => canon(u) && canon(u) === wantUrl)) : null;
+      const profile = (app && app.profile && app.profile.values) || getProfile() || {};
       const answers = (getAnswers() || []).filter((x) => x && x.question && x.answer).slice(0, 1000)
         .map((x) => ({ id: x.id, question: str(x.question, 500), answer: typeof x.answer === 'string' ? x.answer.slice(0, 5000) : x.answer, options: Array.isArray(x.options) ? x.options.slice(0, 50) : [] }));
       const items = store.resumes.get().items || [];
       const job = { title: str(q.get('title'), 300), description: str(q.get('keywords'), 2000), company: str(q.get('company'), 200) };
       const suggested = items.length ? pickResume(store, { job: job.title ? job : undefined }) : null;
       const resumes = items.map((r) => ({ id: r.id, name: r.name, fileName: r.fileName, ext: r.ext, size: r.size, isDefault: !!r.isDefault }));
-      const out = { profile, answers, resumes, suggestedResumeId: suggested ? suggested.id : null };
+      const application = app ? {
+        id: app.id, status: app.status, profileId: app.profileId || 'main', profileLabel: (app.profile && app.profile.label) || 'Me',
+        resumeId: app.resumeId || null, resumeName: app.resumeName || null,
+      } : null;
+      const out = { profile, answers, resumes, suggestedResumeId: suggested ? suggested.id : null, application };
       const want = q.get('resume');
       if (want) {
         const r = want === 'auto' ? suggested : items.find((x) => x.id === want);

@@ -8,7 +8,8 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { verifyTruthful, docToText } from '@shared/tailoredResume.js';
 import { newId } from '@shared/vaultCrypto.js';
 import { tailoredResumeDoc, DEFAULT_MODEL } from './ai.js';
-import { ensureApplication, patchApplication, getApplication, pickResume } from './apply.js';
+import { ensureApplication, patchApplication, getApplication } from './apply.js';
+import { getProfile, pickResumeFor, profileIdOf } from './profiles.js';
 import { loadPdfjs } from './resumeParse.js';
 
 // ---------------------------------------------------------------- WinAnsi-safe text (standard fonts)
@@ -144,13 +145,15 @@ export function tailoredFileName(profile = {}, job = {}) {
  * Generates (or regenerates) the verified tailored PDF for a job and attaches it to the job's
  * application (created as 'saved' if needed). Returns the updated application.
  */
-export async function generateTailored(app, { job, resumeId = 'auto', applicationId, onStep = () => {} }) {
+export async function generateTailored(app, { job, resumeId = 'auto', applicationId, profileId, onStep = () => {} }) {
   const apiKey = app.settings.anthropicKey;
   if (!apiKey) throw new Error('Add your Anthropic API key in AI studio to tailor resumes.');
-  const appRec = applicationId ? getApplication(app, applicationId) : await ensureApplication(app, job, { resumeId });
-  const resume = pickResume(app.resumes, job, resumeId !== 'auto' ? resumeId : (appRec.resumeId || 'auto'));
+  const appRec = applicationId ? getApplication(app, applicationId) : await ensureApplication(app, job, { resumeId, profileId });
+  // Uses the profile of the application (the person it is for).
+  const pid = profileIdOf(appRec);
+  const resume = pickResumeFor(app, job, resumeId !== 'auto' ? resumeId : (appRec.resumeId || 'auto'), pid);
   if (!resume || !(resume.text || '').trim()) throw new Error('This resume has no readable text to tailor. Upload a PDF/DOCX with selectable text.');
-  const profile = app.profile || {};
+  const profile = getProfile(app, pid).values || {};
   onStep('Rewriting your resume for this job');
   const raw = await tailoredResumeDoc({ apiKey, model: app.settings.aiModel || DEFAULT_MODEL, job, profile, resumeText: resume.text });
   onStep('Checking every claim against your real resume');

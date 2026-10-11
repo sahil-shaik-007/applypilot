@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, Eye, EyeOff, Copy, Download, KeyRound, Lock, LogOut, Check, CircleAlert } from 'lucide-react';
 import { createVault, rewrapVault, unlockVault, assertPassphraseStrength, normalizeRecoveryKey } from '@shared/vaultCrypto.js';
 import { useApp } from '../lib/store.jsx';
-import { api } from '../lib/api.js';
+import { api, post } from '../lib/api.js';
 import { Button, Field, copyText, downloadFile } from '../components/ui.jsx';
 import { Brand } from '../components/Brand.jsx';
 
@@ -169,7 +169,7 @@ export function CreateVault() {
   }
 
   return (
-    <VaultFrame title="Create your vault" sub={`Signed in as ${app.user ? app.user.email : ''}. Your vault passphrase encrypts everything on this device before it's synced. We never see it.`}>
+    <VaultFrame title="Create your vault" sub={`Signed in as ${app.user ? (app.user.displayName || 'you') : 'you'}. Your vault passphrase encrypts everything on this device before it's synced. We never see it.`}>
       <div className="col" style={{ gap: 16 }}>
         <div className="card pad small col" style={{ gap: 8 }}>
           {[
@@ -223,7 +223,7 @@ export function Unlock() {
   const s = passphraseStrength(newPass);
   return (
     <VaultFrame icon={Lock} title={mode === 'pass' ? 'Unlock your vault' : 'Recover with your key'}
-      sub={mode === 'pass' ? (app.lockReason || `Welcome back${app.user && app.user.name ? `, ${app.user.name.split(' ')[0]}` : ''}. Enter your vault passphrase to decrypt your data on this device.`) : 'Enter your recovery key, then choose a new passphrase. Your data stays encrypted with the same key.'}>
+      sub={mode === 'pass' ? (app.lockReason || `Welcome back${app.user && app.user.displayName ? `, ${app.user.displayName.split(' ')[0]}` : ''}. Enter your vault passphrase to decrypt your data on this device.`) : 'Enter your recovery key, then choose a new passphrase. Your data stays encrypted with the same key.'}>
       <AnimatePresence mode="wait">
         {mode === 'pass' ? (
           <motion.form key="pass" className="col" style={{ gap: 14 }} onSubmit={unlock} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}>
@@ -243,6 +243,36 @@ export function Unlock() {
           </motion.div>
         )}
       </AnimatePresence>
+    </VaultFrame>
+  );
+}
+
+// First-run question: the name shown in the portal (not the Google or sign-in email).
+export function AskName() {
+  const app = useApp();
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const clean = name.trim().replace(/\s+/g, ' ');
+  const save = async (e) => {
+    e && e.preventDefault();
+    if (!clean) return setErr('Enter the name you want to see in your portal.');
+    setBusy(true); setErr('');
+    try {
+      const r = await post('/me/display-name', { displayName: clean });
+      app.setUser(r.user);
+      await app.refreshMe();
+    } catch (ex) { setErr(ex.message || 'Could not save the name.'); } finally { setBusy(false); }
+  };
+  return (
+    <VaultFrame title="What should we call you?" sub="This is the name shown in your portal. It isn't your email address, and you can change it later in Settings.">
+      <form className="col" style={{ gap: 14 }} onSubmit={save}>
+        <Field label="Your name" help="For example: Sahil Shaik">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} autoFocus autoComplete="name" placeholder="Your name" aria-label="Your name" />
+        </Field>
+        {err && <div className="small" style={{ color: 'var(--red, #f87171)' }}>{err}</div>}
+        <Button variant="primary" type="submit" loading={busy} disabled={!clean}>Continue</Button>
+      </form>
     </VaultFrame>
   );
 }

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { SquareKanban, Download, ExternalLink, Image, Trash2, GraduationCap, Bell, Send, Eraser, Mail, Upload, FileText, CalendarPlus } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS } from '../components/ui';
+import { useDetailsCheck } from '../components/DetailsCheck';
 
 const COLS = [
   { id: 'saved', label: 'Saved', statuses: ['saved'], color: 'var(--muted)' },
@@ -16,6 +17,7 @@ const COLS = [
 
 function AppDrawer({ a, onClose }) {
   const app = useApp();
+  const { ensure: ensureDetails, dialog: detailsDialog } = useDetailsCheck();
   const [notes, setNotes] = useState(a ? a.notes || '' : '');
   const [prep, setPrep] = useState(null);
   const [follow, setFollow] = useState(null);
@@ -24,6 +26,7 @@ function AppDrawer({ a, onClose }) {
   if (!a) return <Drawer open={false} onClose={onClose} />;
   const update = (patch, msg) => app.run('applications:update', [a.id, patch], msg);
   return (
+    <>
     <Drawer open onClose={onClose} header={(
       <div className="row" style={{ gap: 14, alignItems: 'flex-start', paddingRight: 40 }}>
         <Logo name={a.job.company} src={a.job.companyLogo} />
@@ -53,8 +56,8 @@ function AppDrawer({ a, onClose }) {
               {!app.resumes.some((r) => r.id === a.resumeId) && <option value="">✨ Best-matching resume</option>}
               {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
-            <Button size="sm" variant="ghost" onClick={() => app.run('applications:approve', [[a.id], 'review'], 'Opening the pre-filled form…')}>Fill, I submit</Button>
-            <Button size="sm" variant="primary" icon={Send} disabled={!app.resumes.length} onClick={() => app.run('applications:approve', [[a.id], app.plan.autoSubmit ? 'auto' : 'review'], 'Applying…')}>{app.plan.autoSubmit ? 'Apply now' : 'Apply'}</Button>
+            <Button size="sm" variant="ghost" onClick={async () => { if (await ensureDetails(a.profileId || 'main')) app.run('applications:approve', [[a.id], 'review'], 'Opening the pre-filled form…'); }}>Fill, I submit</Button>
+            <Button size="sm" variant="primary" icon={Send} disabled={!app.resumes.length} onClick={async () => { if (await ensureDetails(a.profileId || 'main')) app.run('applications:approve', [[a.id], app.plan.autoSubmit ? 'auto' : 'review'], 'Applying…'); }}>{app.plan.autoSubmit ? 'Apply now' : 'Apply'}</Button>
           </div>
         )}
         <div className="grid g3">
@@ -112,6 +115,8 @@ function AppDrawer({ a, onClose }) {
         </div>
       </div>
     </Drawer>
+    {detailsDialog}
+    </>
   );
 }
 

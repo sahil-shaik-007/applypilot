@@ -4,6 +4,7 @@ import { Inbox, Check, X, ExternalLink, Send, Zap, CircleAlert, MessageSquareTex
 import { useApp } from '../lib/store';
 import { Button, Logo, ScoreRing, Empty, Seg, timeAgo, salary } from '../components/ui';
 import { JobDrawer, AUTO_ATS } from '../components/jobs';
+import { useDetailsCheck } from '../components/DetailsCheck';
 
 // Normalised question text: the key that matches a card question with its Answer bank entry.
 const normQ = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -124,9 +125,13 @@ export default function ReviewQueue() {
   const submitting = app.applications.filter((a) => a.pendingSubmitUntil && new Date(a.pendingSubmitUntil) > new Date());
   React.useEffect(() => { if (!submitting.length) return undefined; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [submitting.length]);
 
+  const { ensure: ensureDetails, dialog: detailsDialog } = useDetailsCheck();
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const approve = async (ids) => {
     if (!ids.length) return;
+    // Every profile that is about to apply must have its details; missing ones are asked for first.
+    const profileIds = [...new Set(ids.map((id) => (app.applications.find((x) => x.id === id) || {}).profileId || 'main'))];
+    for (const pid of profileIds) { if (!(await ensureDetails(pid))) return; }
     await app.run('applications:approve', [ids, mode], `Applying to ${ids.length} job${ids.length > 1 ? 's' : ''}…`);
     setSel(new Set());
   };
@@ -259,6 +264,7 @@ export default function ReviewQueue() {
         )}
       </section>
       <JobDrawer job={open} onClose={() => setOpen(null)} />
+      {detailsDialog}
     </div>
   );
 }

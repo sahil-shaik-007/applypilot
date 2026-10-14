@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Smartphone, RefreshCw, Lock, Users, Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn, Search, Zap } from 'lucide-react';
+import { Smartphone, RefreshCw, Lock, Users, Settings as Cog, Database, KeyRound, Building2, Crown, HardDrive, Check, ExternalLink, Globe, Trash2, Plus, Bot, Monitor, LogIn, Search, Zap, Puzzle, FolderOpen } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Field, Switch, Seg } from '../components/ui';
 import { CONFIG, PRICING } from '../config';
@@ -12,6 +12,7 @@ const TABS = [
   { id: 'companies', label: 'Career pages', icon: Building2 },
   { id: 'network', label: 'Network (referrals)', icon: Users },
   { id: 'cloud', label: 'Phone & web', icon: Smartphone },
+  { id: 'extension', label: 'Browser extension', icon: Puzzle },
   { id: 'plan', label: 'Plan & license', icon: Crown },
   { id: 'data', label: 'Data & privacy', icon: HardDrive },
 ];
@@ -472,10 +473,72 @@ function Data() {
   );
 }
 
+// Pair the ApplyPilot browser extension with this PC. The extension fills application forms in your own
+// browser from your profile; nothing is submitted until you press submit.
+function Extension() {
+  const app = useApp();
+  const [st, setSt] = useState(null);
+  const load = () => app.run('extension:status').then(setSt).catch(() => {});
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15000);
+    const off = window.api.on((ch) => { if (ch === 'extension:paired') load(); });
+    return () => { clearInterval(t); off(); };
+  }, []); // eslint-disable-line
+  if (!st) return null;
+  const revoke = async (p) => {
+    if (!(await app.confirm({ title: 'Unpair this browser?', message: `${p.name || p.browser || 'This browser'} will stop filling forms until you pair it again.`, confirmLabel: 'Unpair' }))) return;
+    setSt(await app.run('extension:revoke', [p.id]));
+  };
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <p className="muted" style={{ margin: 0 }}>The ApplyPilot extension fills job application forms in your own Chrome or Edge from your profile. It shows what it will fill and what is missing, fills only after you confirm, and never submits for you.</p>
+      <div className="card pad col" style={{ gap: 10 }}>
+        <div className="row between">
+          <div className="section-title" style={{ margin: 0 }}>Connection</div>
+          <span className={`badge ${st.running ? 'green' : 'red'}`}>{st.running ? `Running · port ${st.port}` : 'Not running'}</span>
+        </div>
+        {!st.running && <div className="small dim">The local connection could not start. Restart ApplyPilot; if it keeps failing, another program may be using ports 47823-47833.</div>}
+        {st.running && st.code && (
+          <div className="col" style={{ gap: 6 }}>
+            <span className="field-label">Pairing code (valid for 10 minutes, single use)</span>
+            <div className="row" style={{ gap: 10 }}>
+              <span style={{ fontSize: 28, fontWeight: 700, letterSpacing: '0.18em' }} data-testid="pair-code">{st.code.code}</span>
+              <Button size="sm" onClick={async () => setSt(await app.run('extension:newCode'))}>New code</Button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="card pad col" style={{ gap: 8 }}>
+        <div className="section-title" style={{ margin: 0 }}>Install in 4 steps</div>
+        <ol className="small muted" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+          <li>Open <b>chrome://extensions</b> (or <b>edge://extensions</b>) and turn on <b>Developer mode</b>.</li>
+          <li>Click <b>Load unpacked</b> and choose the ApplyPilot extension folder (button below).</li>
+          <li>Pin the ApplyPilot icon, open it, and enter the pairing code above.</li>
+          <li>Open a job application page, click the icon, review, and confirm to fill.</li>
+        </ol>
+        <div className="row"><Button icon={FolderOpen} disabled={!st.folderReady} onClick={() => app.run('extension:openFolder')}>Open extension folder</Button>{!st.folderReady && <span className="small dim">The extension folder was not found next to the app.</span>}</div>
+      </div>
+      <div className="card pad col" style={{ gap: 8 }}>
+        <div className="section-title" style={{ margin: 0 }}>Paired browsers</div>
+        {st.pairings.length ? st.pairings.map((p) => (
+          <div key={p.id} className="row between">
+            <div className="col" style={{ gap: 2 }}>
+              <span style={{ fontWeight: 600 }}>{p.name || p.browser || 'Browser'}</span>
+              <span className="small dim">Paired {new Date(p.createdAt).toLocaleDateString()}{p.lastSeenAt ? ` · last used ${new Date(p.lastSeenAt).toLocaleString()}` : ''}</span>
+            </div>
+            <Button size="sm" icon={Trash2} onClick={() => revoke(p)}>Unpair</Button>
+          </div>
+        )) : <div className="small dim">No browser paired yet.</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings({ params }) {
   const [tab, setTab] = useState(params.tab || 'general');
   useEffect(() => { if (params.tab) setTab(params.tab); }, [params.tab]);
-  const Comp = { general: General, sources: Sources, ai: AI, companies: Companies, network: Network, cloud: Cloud, plan: Plan, data: Data }[tab];
+  const Comp = { general: General, sources: Sources, ai: AI, companies: Companies, network: Network, cloud: Cloud, extension: Extension, plan: Plan, data: Data }[tab];
   return (
     <div className="page">
       <div className="page-head"><div><h1>Settings</h1><p>Tune how ApplyPilot searches and applies.</p></div></div>

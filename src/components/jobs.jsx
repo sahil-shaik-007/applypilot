@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ShieldAlert, Plane, Users, Building2, Newspaper, MessagesSquare, Star as StarIcon, Banknote, MapPin, Clock, ExternalLink, Bookmark, BookmarkX, Send, Wand2, Zap, Sparkles, Copy, FileText, MessageSquareText, GraduationCap, ShieldCheck, CircleAlert } from 'lucide-react';
 import { useApp } from '../lib/store';
 import { Button, Drawer, Logo, ScoreRing, StatusBadge, Markdown, Seg, timeAgo, salary, stagger } from './ui';
+import { useDetailsCheck } from './DetailsCheck';
 
 export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'smartrecruiters', 'recruitee'];
 export const SOURCE_LABEL = (id, connectors = []) => (connectors.find((c) => c.id === id) || {}).name || id;
@@ -58,6 +59,7 @@ function Bar({ label, value }) {
 
 export function JobDrawer({ job, onClose }) {
   const app = useApp();
+  const { ensure: ensureDetails, dialog: detailsDialog } = useDetailsCheck();
   const [tab, setTab] = useState('details');
   const [resumeId, setResumeId] = useState('auto');
   const [profileId, setProfileId] = useState(null); // null = this job's current application profile, else main
@@ -79,6 +81,7 @@ export function JobDrawer({ job, onClose }) {
   const canAuto = AUTO_ATS.includes(job.ats);
 
   const apply = async () => {
+    if (!(await ensureDetails(activeProfile))) return; // missing name/email/phone/location are asked for first
     setBusy('apply');
     try {
       await app.run('jobs:apply', [job.id, { resumeId, mode, ...(multi ? { profileId: activeProfile } : {}) }], mode === 'auto' ? 'Applying in the background…' : 'Opening the application and filling it in…');
@@ -91,6 +94,7 @@ export function JobDrawer({ job, onClose }) {
   };
 
   return (
+    <>
     <Drawer open={!!job} onClose={onClose} header={(
       <div className="row" style={{ alignItems: 'flex-start', gap: 14, paddingRight: 40 }}>
         <Logo name={job.company} src={job.companyLogo} />
@@ -247,6 +251,8 @@ export function JobDrawer({ job, onClose }) {
         </div>
       )}
     </Drawer>
+    {detailsDialog}
+    </>
   );
 }
 

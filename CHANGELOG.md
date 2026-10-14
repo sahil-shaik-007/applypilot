@@ -2,6 +2,24 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.0] — 2026-10-15
+
+### Added
+- **Browser extension connection (Windows app).** The local bridge now starts with the app, and Settings has a
+  **Browser extension** tab: connection status, a six-digit pairing code (renewable), a list of paired browsers
+  with Unpair, and install steps. The installer ships the extension folder. See docs/EXTENSION.md.
+  Before this, the extension had nothing to connect to.
+- **Complete your details before applying.** When an application starts (Review queue, job drawer, application
+  drawer) and the profile used is missing a name, email, phone, city or country, a dialog asks only for what is
+  missing and saves it to that profile. Cancelling starts nothing.
+
+### Changed
+- Profile changes made in one screen show immediately in the others.
+
+### Tests
+- Desktop e2e 72/72 (new: extension tab and pairing code; details dialog appears for a missing field, asks only
+  for it, and cancelling starts nothing).
+
 ## [1.6.0] — 2026-10-14
 
 ### Added

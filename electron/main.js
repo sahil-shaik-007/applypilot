@@ -17,6 +17,7 @@ const tailored = require('./tailoredResume');
 const csvImport = require('./csvImport');
 const { CloudSync } = require('./cloudSync');
 let cloud = null;
+let bridge = null; // local bridge for the browser extension (127.0.0.1 only)
 const PROFILE_SCHEMA = require('./data/profile-schema.json');
 
 // Allows isolated test profiles: APPLYPILOT_USER_DATA=C:	mpp electron .
@@ -302,6 +303,7 @@ function registerIpc() {
       if (!found) throw new Error('Profile not found');
     }
     const profiles = profilesOut();
+    emit('profiles:changed', { id });
     return { saved: profiles.find((x) => x.id === id), profiles };
   });
   // Deleting an extra profile keeps its resumes and applications (applications that are still open keep a copy of
@@ -595,6 +597,18 @@ function registerIpc() {
 
   handle('activity:list', () => store.activity.get().items.slice(0, 300));
   // ---- Phone & web (zero-knowledge sync, see docs/CLOUD.md)
+  // ---- Browser extension: the bridge's pairing code and the browsers paired with this PC
+  const extensionDir = () => (app.isPackaged ? path.join(process.resourcesPath, 'extension') : path.join(__dirname, '..', 'extension'));
+  const extStatus = () => ({
+    running: !!bridge, port: bridge ? bridge.port : null,
+    code: bridge ? bridge.getPairingCode() : null,
+    pairings: bridge ? bridge.listPairings() : [],
+    folder: extensionDir(), folderReady: fs.existsSync(path.join(extensionDir(), 'manifest.json')),
+  });
+  handle('extension:status', () => extStatus());
+  handle('extension:newCode', () => { if (bridge) bridge.resetPairing(); return extStatus(); });
+  handle('extension:revoke', (id) => { if (bridge) bridge.revokePairing(String(id)); return extStatus(); });
+  handle('extension:openFolder', async () => { await shell.openPath(extensionDir()); return true; });
   handle('cloud:status', () => cloud.status());
   handle('cloud:link', (o) => cloud.link(o));
   handle('cloud:unlink', () => cloud.unlink());
@@ -888,6 +902,12 @@ app.whenReady().then(() => {
   cloud.start();
   setTimeout(() => cloud.syncNow().catch(() => {}), 8000);
   registerIpc();
+  // Local bridge for the browser extension. It listens on 127.0.0.1 only and needs a 6-digit pairing code.
+  try {
+    require('./bridge').startBridge({ store, manager, appVersion: app.getVersion(), notify, emit, log: (m) => logToFile('info', m) })
+      .then((b) => { bridge = b; emit('extension:paired', b.listPairings()); })
+      .catch((e) => logToFile('warn', `extension bridge not started: ${e.message}`));
+  } catch (e) { logToFile('warn', `extension bridge not started: ${e.message}`); }
   createWindow();
   createTray();
   if (process.argv.includes('--hidden')) win.once('ready-to-show', () => win.hide());
@@ -908,6 +928,6 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', () => windowFit.reveal(win));
-app.on('before-quit', () => { quitting = true; try { manager && manager.stopAll(); } catch {} try { store && store.flushAll(); } catch {} });
+app.on('before-quit', () => { quitting = true; try { bridge && bridge.stop(); } catch {} try { manager && manager.stopAll(); } catch {} try { store && store.flushAll(); } catch {} });
 app.on('will-quit', async () => { try { engine && engine.close && (await engine.close()); } catch {} });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

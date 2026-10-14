@@ -545,6 +545,17 @@ async function applicationsPage() {
     await card.click(); await page.waitForTimeout(700);
     assert(await page.locator('.drawer').getByRole('button', { name: /Fill, I submit/ }).isVisible(), 'no apply action in drawer');
     assert(await page.locator('.drawer select').first().isVisible(), 'no resume selector');
+    // Missing details are asked for before anything opens: blank a required field, press Fill, then cancel.
+    const before = (await call('app:bootstrap')).profile.values || {};
+    await call('profiles:save', { id: 'main', values: { ...before, country: '' } });
+    await page.waitForTimeout(400);
+    await page.locator('.drawer').getByRole('button', { name: /Fill, I submit/ }).click(); await page.waitForTimeout(600);
+    assert(await page.locator('.modal').getByText(/Complete .* details/).isVisible(), 'details dialog did not appear');
+    assert(await page.locator('.modal input[aria-label="Country"]').isVisible(), 'country field missing in the dialog');
+    assert(!(await page.locator('.modal input[aria-label="Last name"]').count()), 'dialog asks for details that are already saved');
+    await page.locator('.modal-foot button', { hasText: 'Cancel' }).click(); await page.waitForTimeout(400);
+    assert((await call('applications:list')).some((x) => x.jobId === job.id && x.status === 'saved'), 'cancelling the dialog must not start the application');
+    await call('profiles:save', { id: 'main', values: before });
     await page.locator('.drawer button[title="Delete from tracker"]').click();
     await confirmDialog('Delete');
     await page.locator('.drawer').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
@@ -765,6 +776,19 @@ async function settingsAndPlans() {
     await page.locator('select[aria-label="Unit"]').first().selectOption('days'); await page.waitForTimeout(200);
     assert(await page.locator('input[aria-label="Amount"]').first().inputValue() === '5', 'custom amount not kept');
     await shot('18-find-jobs-prompt');
+  });
+  await check('Browser extension tab: the connection runs and shows a pairing code that can be renewed', async () => {
+    await nav('Settings');
+    await page.locator('.side-list button', { hasText: 'Browser extension' }).click(); await page.waitForTimeout(1200);
+    assert(await page.getByText(/Running . port/).first().isVisible(), 'extension connection is not running');
+    const first = (await page.locator('[data-testid="pair-code"]').innerText()).trim();
+    assert(/^\d{6}$/.test(first), `pairing code is not 6 digits: ${first}`);
+    const st = await call('extension:status');
+    assert(st.running && st.port >= 47823 && st.port <= 47833, `bridge status ${JSON.stringify(st)}`);
+    await page.getByRole('button', { name: 'New code' }).click(); await page.waitForTimeout(600);
+    const second = (await page.locator('[data-testid="pair-code"]').innerText()).trim();
+    assert(/^\d{6}$/.test(second) && second !== first, `code not renewed: ${first} -> ${second}`);
+    assert(await page.getByText('No browser paired yet.').isVisible(), 'paired list missing');
   });
   await check('AI actions without a key show a helpful message', async () => {
     try { await call('ai:coverLetter', 'nope'); throw new Error('no error'); } catch (e) { assert(/Anthropic API key/.test(e.message), e.message); }

@@ -126,6 +126,17 @@ function ResumeCard({ r, index }) {
           <span className="label">Use for roles like</span>
           <TagInput value={r.roles || []} onChange={(roles) => update({ roles })} placeholder="e.g. Data Analyst, BI Developer" />
         </div>
+        {(app.profiles || []).length > 1 && (
+          <div style={{ marginTop: 14 }}>
+            <span className="label">For profile</span>
+            <select className="select" value={r.profileId || ''} onChange={(e) => update({ profileId: e.target.value || null })}>
+              <option value="">Everyone (shared)</option>
+              {app.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''} only</option>)}
+              {r.profileId && !app.profiles.some((p) => p.id === r.profileId) && <option value={r.profileId}>Removed profile</option>}
+            </select>
+            <div className="tiny dim" style={{ marginTop: 4 }}>Auto-pick only uses shared resumes and the ones for the profile that is applying.</div>
+          </div>
+        )}
         {r.skills && r.skills.length > 0 && <div className="chips" style={{ marginTop: 12 }}>{r.skills.slice(0, 16).map((s) => <span className="badge" key={s}>{s}</span>)}{r.skills.length > 16 && <span className="badge">+{r.skills.length - 16}</span>}</div>}
       </div>
       <div style={{ borderTop: '1px solid var(--border)', padding: '12px 18px', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>

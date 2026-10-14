@@ -83,9 +83,43 @@ class CampaignManager {
     if (out) this.emit('application:update', out);
     return out;
   }
-  attemptsToday(campaignId) {
+  // The profile an application belongs to: its own, else its campaign's, else main.
+  appProfileId(a) {
+    if (a.profileId) return a.profileId;
+    const c = a.campaignId ? this.campaign(a.campaignId) : null;
+    return (c && c.profileId) || 'main';
+  }
+  // Application attempts made today (UTC day), optionally for one campaign and/or one profile.
+  attemptsToday(campaignId, profileId) {
     const d = today();
-    return this.store.applications.get().items.filter((a) => a.attemptedAt && a.attemptedAt.startsWith(d) && (!campaignId || a.campaignId === campaignId)).length;
+    const pid = profileId ? String(profileId) : null;
+    return this.store.applications.get().items.filter((a) => a.attemptedAt && a.attemptedAt.startsWith(d)
+      && (!campaignId || a.campaignId === campaignId) && (!pid || this.appProfileId(a) === pid)).length;
+  }
+  // { profileId: attempts today } over every application, for the daily-limit messages.
+  attemptsByProfile() {
+    const d = today();
+    const out = {};
+    for (const a of this.store.applications.get().items) {
+      if (!(a.attemptedAt && a.attemptedAt.startsWith(d))) continue;
+      const id = this.appProfileId(a);
+      out[id] = (out[id] || 0) + 1;
+    }
+    return out;
+  }
+  // Same numbers as text: "Main profile 30, Brother 10".
+  attemptsSummary() {
+    return Object.entries(this.attemptsByProfile()).map(([id, n]) => `${this.store.resolveProfile(id).label} ${n}`).join(', ');
+  }
+  // Profiles that currently have a running campaign (always includes `include`).
+  activeProfiles(include) {
+    const set = new Set();
+    for (const id of this.runners.keys()) {
+      const c = this.campaign(id);
+      if (c) set.add(this.store.resolveProfile(c.profileId).id);
+    }
+    if (include) set.add(include);
+    return set;
   }
   // Duplicate guard + per-company cap (max 2 applications to one company per 30 days) so parallel
   // campaigns never spam the same recruiter.
@@ -239,9 +273,15 @@ class CampaignManager {
 
     if (!good.length) return;
     const plan = this.getPlan();
-    const globalLeft = Math.min(plan.dailyApplies, Number(this.settings().dailyApplyLimit) || plan.dailyApplies) - this.attemptsToday();
+    const cap = Math.min(plan.dailyApplies, Number(this.settings().dailyApplyLimit) || plan.dailyApplies);
+    const globalLeft = cap - this.attemptsToday();
     const campLeft = (Number(c.dailyLimit) || 25) - this.attemptsToday(c.id);
-    const budget = Math.max(0, Math.min(globalLeft, campLeft));
+    // With campaigns running for several profiles, the plan's daily allowance is shared evenly between them so one
+    // profile's campaigns cannot use it all up before the others get a turn. (The plan's total is unchanged.)
+    const owner = this.store.resolveProfile(c.profileId).id;
+    const active = this.activeProfiles(owner);
+    const shareLeft = active.size > 1 ? Math.ceil(cap / active.size) - this.attemptsToday(null, owner) : Infinity;
+    const budget = Math.max(0, Math.min(globalLeft, campLeft, shareLeft));
 
     // Queue mode keeps at most 50 jobs waiting per campaign so the review queue stays manageable.
     const waiting = this.store.applications.get().items.filter((a) => a.campaignId === c.id && a.status === 'queued').length;
@@ -254,7 +294,13 @@ class CampaignManager {
       }
       return;
     }
-    if (!budget) { this.log('limit', `Daily application limit reached — "${c.name}" will continue tomorrow.`, { campaignId: c.id }); return; }
+    if (!budget) {
+      const why = globalLeft <= 0 ? `the daily limit of ${cap} is used up (today: ${this.attemptsSummary() || 'none yet'})`
+        : campLeft <= 0 ? `this campaign reached its own limit of ${Number(c.dailyLimit) || 25} a day`
+          : `${this.store.resolveProfile(c.profileId).label} used its even share of today's ${cap} (${active.size} profiles are running campaigns)`;
+      this.log('limit', `"${c.name}" will continue tomorrow: ${why}.`, { campaignId: c.id });
+      return;
+    }
     this.patchCampaign(c.id, { phase: 'applying' });
     // Two applications per campaign at a time; the engine caps total browser tabs across campaigns.
     let i = 0;
@@ -330,19 +376,25 @@ class CampaignManager {
 
   // Q&A memory first, then AI, otherwise remember the question so the user can answer it once for next time.
   async answerQuestion(question, info, ctx) {
-    const all = this.store.qa.get().items;
-    // Answers the AI wrote from one profile are reused only for that profile; answers typed in the bank are shared.
+    // Answers are per profile: this profile's own records first, then the ones shared with every profile
+    // (no profileId), never another profile's. AI answers and open questions are tagged with the asking profile.
     const pid = (ctx && ctx.profileId) || 'main';
-    const items = all.filter((q) => !q.profileId || q.profileId === pid);
-    let best = null; let bestSim = 0;
-    for (const q of items) {
-      if (!q.answer) continue;
-      const sim = similarity(q.question, question);
-      if (sim > bestSim) { best = q; bestSim = sim; }
-    }
-    if (best && bestSim >= 0.72) {
-      this.store.qa.update((d) => { const q = d.items.find((x) => x.id === best.id); if (q) q.uses = (q.uses || 0) + 1; });
-      return best.answer;
+    const visible = this.store.qaFor(pid);
+    const bestOf = (list) => {
+      let best = null; let bestSim = 0;
+      for (const q of list) {
+        if (!q.answer) continue;
+        const sim = similarity(q.question, question);
+        if (sim > bestSim) { best = q; bestSim = sim; }
+      }
+      return { best, sim: bestSim };
+    };
+    const own = bestOf(visible.filter((q) => q.profileId === pid));
+    const shared = bestOf(visible.filter((q) => !q.profileId));
+    const hit = own.best && own.sim >= 0.72 ? own.best : shared.best && shared.sim >= 0.72 ? shared.best : null;
+    if (hit) {
+      this.store.qa.update((d) => { const q = d.items.find((x) => x.id === hit.id); if (q) q.uses = (q.uses || 0) + 1; });
+      return hit.answer;
     }
     const s = this.settings();
     if (s.aiAnswerQuestions && this.canUseAi()) {
@@ -359,8 +411,8 @@ class CampaignManager {
     // Remember real screening questions for the user to answer once — but not empty optional
     // one-word fields like "Twitter" or "Other website".
     const worthAsking = info.required || question.trim().split(/\s+/).length >= 4;
-    if (worthAsking && !all.some((q) => similarity(q.question, question) >= 0.85)) {
-      this.store.qa.update((d) => { d.items.unshift({ id: crypto.randomUUID(), question, answer: '', options: info.options || [], source: 'pending', uses: 0, updatedAt: new Date().toISOString() }); });
+    if (worthAsking && !visible.some((q) => similarity(q.question, question) >= 0.85)) {
+      this.store.qa.update((d) => { d.items.unshift({ id: crypto.randomUUID(), question, answer: '', options: info.options || [], source: 'pending', profileId: pid, uses: 0, updatedAt: new Date().toISOString() }); });
       this.emit('qa:pending', { question });
     }
     return null;
@@ -368,8 +420,11 @@ class CampaignManager {
 
   // Every question an application is left with goes into the Answer bank too (once), so the bank's
   // "Needs answer" list and the Review queue card agree. File fields are not text questions, so they are skipped.
-  rememberOpenQuestions(list = []) {
-    const items = this.store.qa.get().items;
+  // Each one is tagged with the profile whose application left it open, so it is answered (and reused) for that
+  // profile; the Answer bank lets the user share an answer with every profile afterwards.
+  rememberOpenQuestions(list = [], profileId = 'main') {
+    const pid = profileId || 'main';
+    const items = this.store.qaFor(pid);
     const fresh = [];
     for (const u of list || []) {
       const question = String((u && u.question) || '').trim();
@@ -377,7 +432,7 @@ class CampaignManager {
       if (!(u.required || question.split(/\s+/).length >= 4)) continue;
       const dup = (q) => similarity(q.question, question) >= 0.85;
       if (items.some(dup) || fresh.some(dup)) continue;
-      fresh.push({ id: crypto.randomUUID(), question, answer: '', options: [], source: 'pending', uses: 0, updatedAt: new Date().toISOString() });
+      fresh.push({ id: crypto.randomUUID(), question, answer: '', options: [], source: 'pending', profileId: pid, uses: 0, updatedAt: new Date().toISOString() });
     }
     if (!fresh.length) return 0;
     this.store.qa.update((d) => { d.items.unshift(...fresh); });
@@ -392,7 +447,8 @@ class CampaignManager {
     if (!engine) { this.patchApp(appId, { status: 'failed' }, { type: 'error', message: 'Auto-apply engine unavailable' }); return; }
     const plan = this.getPlan();
     if (this.attemptsToday() >= plan.dailyApplies) {
-      this.patchApp(appId, {}, { type: 'limit', message: `Daily limit of ${plan.dailyApplies} reached on the ${plan.label} plan` });
+      const split = this.attemptsSummary();
+      this.patchApp(appId, {}, { type: 'limit', message: `Daily limit of ${plan.dailyApplies} reached on the ${plan.label} plan${split ? ` (today: ${split})` : ''}` });
       return;
     }
     const campaign = app.campaignId ? this.campaign(app.campaignId) : null;
@@ -440,7 +496,7 @@ class CampaignManager {
         this.log('applied', `Applied: ${job.title} at ${job.company}`, { applicationId: appId, campaignId: app.campaignId });
         this.notify('Application submitted', `${job.title} at ${job.company}`);
       } else if (status === 'awaiting-you') {
-        this.rememberOpenQuestions(result.unanswered || cur.unanswered || []);
+        this.rememberOpenQuestions(result.unanswered || cur.unanswered || [], owned.id);
         if (!wasAwaiting) {
           this.log('review', `Needs you: ${job.title} at ${job.company} — ${result.message || 'review & submit'}`, { applicationId: appId });
           this.notify('Application needs your review', `${job.title} at ${job.company}`);
@@ -479,6 +535,7 @@ class CampaignManager {
       const done = engine.applyToJob({
         job,
         profile,
+        profileKey: owned.id, // browser state left by another profile is cleared before the form opens
         resume: upload,
         coverLetterText,
         mode: effectiveMode,
@@ -491,7 +548,7 @@ class CampaignManager {
             const cur = this.store.applications.get().items.find((a) => a.id === appId);
             const open = (ev.data && ev.data.unanswered) || (cur && cur.unanswered) || [];
             this.patchApp(appId, { status: 'awaiting-you', unanswered: open }, { type: ev.type, message: ev.message });
-            this.rememberOpenQuestions(open);
+            this.rememberOpenQuestions(open, owned.id);
             this.log('review', `Needs you: ${job.title} at ${job.company} — ${ev.message}`, { applicationId: appId });
             this.notify('Application ready for your review', `${job.title} at ${job.company}`);
             handOff();

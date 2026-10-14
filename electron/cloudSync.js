@@ -109,6 +109,7 @@ class CloudSync {
     this.emit('cloud:status', this.status());
     const stats = { pushed: 0, pulled: 0, fromPhone: 0 };
     try {
+      await this.flushDeletes();
       await this.pull(stats);
       await this.push(stats);
       this.store.cloud.update((c) => { c.lastSyncAt = new Date().toISOString(); c.lastError = null; c.stats = stats; });
@@ -121,6 +122,32 @@ class CloudSync {
       this.emit('cloud:status', this.status());
     }
     return this.status();
+  }
+
+  // A record deleted on this PC (a profile, an answer) is tombstoned on the server on the next sync, so it can
+  // not come back from there. Kept in cloud state until the server confirms; only while linked.
+  queueDelete(collection, id) {
+    if (!this.s.tokenEnc) return false;
+    const key = `${collection}/${id}`;
+    this.store.cloud.update((c) => {
+      c.pendingDeletes = [...new Set([...(c.pendingDeletes || []), key])];
+      if (c.pushed) delete c.pushed[key];
+    });
+    this.syncNow().catch(() => {});
+    return true;
+  }
+  async flushDeletes() {
+    for (const key of [...(this.s.pendingDeletes || [])]) {
+      const i = key.indexOf('/');
+      const collection = key.slice(0, i); const id = key.slice(i + 1);
+      try {
+        await this.api('DELETE', `/api/items/${collection}/${encodeURIComponent(id)}`);
+      } catch (e) {
+        if (e.status === 401) throw e;
+        if (e.status !== 404) continue; // try again on the next sync
+      }
+      this.store.cloud.update((c) => { c.pendingDeletes = (c.pendingDeletes || []).filter((k) => k !== key); });
+    }
   }
 
   async encryptFor(collection, id, value) {
@@ -163,7 +190,10 @@ class CloudSync {
     }
     if (collection === 'qa') {
       const q = this.store.qa.get().items.find((x) => x.id === id);
-      return q ? { ...q, _updatedAt: Date.parse(q.updatedAt || 0) || 0 } : null;
+      if (!q) return null;
+      const plain = { ...q, _updatedAt: Date.parse(q.updatedAt || 0) || 0 };
+      if (!plain.profileId) delete plain.profileId; // no profileId = shared with every profile
+      return plain;
     }
     if (collection === 'applications') {
       const a = this.store.applications.get().items.find((x) => x.id === id);
@@ -212,6 +242,7 @@ class CloudSync {
     for (const it of items) {
       this.store.cloud.update((c) => { c.versions = { ...(c.versions || {}), [`${it.collection}/${it.id}`]: it.version }; });
       if (it.deleted || !it.ciphertext) continue;
+      if ((this.s.pendingDeletes || []).includes(`${it.collection}/${it.id}`)) continue; // deleted here, not confirmed yet
       let v;
       try { v = await this.decryptFrom(it); } catch (e) { this.log(`skip undecryptable ${it.collection}/${it.id}: ${e.message}`); continue; }
       stats.pulled++;
@@ -239,9 +270,14 @@ class CloudSync {
         this.emit('profiles:changed', true);
         this.markSynced(c, it.id);
       } else if (c === 'qa') {
+        // profileId travels both ways: a string = that profile's answer, absent = shared with every profile.
+        // Object.assign alone would keep a stale profileId when the other side made the answer shared.
+        const rec = stripMeta(v, ts);
+        if (typeof rec.profileId !== 'string' || !rec.profileId) delete rec.profileId;
         this.store.qa.update((d) => {
           const cur = d.items.find((q) => q.id === it.id);
-          if (!cur) d.items.unshift(stripMeta(v, ts)); else Object.assign(cur, stripMeta(v, ts));
+          if (!cur) d.items.unshift(rec);
+          else { if (!rec.profileId) delete cur.profileId; Object.assign(cur, rec); }
         });
         this.markSynced(c, it.id);
       } else if (c === 'applications') {
@@ -287,29 +323,75 @@ class CloudSync {
   // A job sent from the phone: queue it (and start filling it if the user asked for that).
   // Outbox item fields read here: jobId, job (snapshot), resumeId, mode ('auto' or review), profileId and
   // profile { label, values } (the phone's snapshot of the profile this job is for; absent for the main profile).
+  //
+  // A job that already has an application for the SAME profile is not a duplicate to drop when that application is
+  // still open (awaiting-you, failed, queued, saved): sending it again from the phone is the user's confirmation, so
+  // it is updated and started again. One the user already finished (applied, interview, offer, rejected, skipped)
+  // or one that is running right now is left alone and the reason is written to its log.
   async takeFromOutbox(it, v) {
+    try {
+      await this.acceptOutbox(v || {});
+    } catch (e) {
+      this.log(`outbox item ${it.id} failed: ${e.message}`);
+      try { this.notify('Could not start a job sent from your phone', e.message); } catch {}
+    }
+    await this.api('DELETE', `/api/items/outbox/${encodeURIComponent(it.id)}`).catch(() => {});
+  }
+
+  async acceptOutbox(v) {
     const { scoreJob } = require('./match');
     const job = { ...(v.job || {}), id: v.jobId || (v.job && v.job.id) };
     // Snapshot sent with the job wins; otherwise the synced profiles record; otherwise the main profile.
     const snap = v.profile && v.profile.values && typeof v.profile.values === 'object' ? v.profile : null;
     const profile = snap ? { id: v.profileId || 'main', label: snap.label || 'Profile', values: snap.values } : this.store.resolveProfile(v.profileId);
-    const dup = this.store.applications.get().items.some((a) => a.jobId === job.id && (a.profileId || 'main') === profile.id);
-    if (job.title && !dup) {
-      const resume = this.manager.resumeFor(profile.id, { resumeId: v.resumeId, job });
-      const match = scoreJob(job, { resumeText: resume ? resume.text : '', profile: profile.values });
-      const app = this.manager.createApplication({ job, match, resume, campaign: null, status: 'queued', profileId: profile.id, profile: snap ? { label: profile.label, values: profile.values } : null });
-      this.manager.patchApp(app.id, { campaignName: 'Sent from phone' }, { type: 'step', message: `Sent from your phone${profile.id !== 'main' ? ` for ${profile.label}` : ''}` });
-      if (resume && resume.profileId && resume.profileId !== profile.id) {
-        // The resume was chosen on the phone even though it is tagged for another profile: allowed, but say so.
-        this.manager.patchApp(app.id, {}, { type: 'warn', message: `"${resume.name || resume.fileName}" is tagged for a different profile than this application (${profile.label})` });
+    const auto = v.mode === 'auto';
+    const mgr = this.manager;
+    const existing = job.id
+      ? this.store.applications.get().items.find((a) => a.jobId === job.id && mgr.appProfileId(a) === profile.id)
+      : null;
+
+    if (existing) {
+      const RETRY = ['awaiting-you', 'failed', 'queued', 'saved'];
+      if (!RETRY.includes(existing.status)) {
+        const why = existing.status === 'in-progress' ? 'it is being applied to right now'
+          : existing.status === 'skipped' ? 'you skipped it' : `it is already marked ${existing.status}`;
+        mgr.patchApp(existing.id, {}, { type: 'info', message: `Sent again from your phone but ignored: ${why}` });
+        return;
       }
-      // "auto" = apply now on autopilot (cancel window, scam and still-open checks still apply);
-      // anything else waits in the Review queue so pre-filled tabs don't pile up while you're away.
-      const auto = v.mode === 'auto';
-      this.notify('Job sent from your phone', `${job.title} at ${job.company} — ${auto ? 'applying on autopilot' : 'waiting in your Review queue'}`);
-      if (auto) this.manager.applyApplication(app.id, { mode: 'auto' }).catch(() => {});
+      const merged = { ...existing.job, ...job, id: existing.jobId };
+      const resume = mgr.resumeFor(profile.id, { resumeId: v.resumeId || existing.resumeId, job: merged });
+      // The page of a previous attempt may still be open and watched: close that run first so two do not fight.
+      const live = mgr.applying.get(existing.id);
+      if (live) {
+        live.abort();
+        for (let i = 0; i < 40 && mgr.applying.has(existing.id); i++) await new Promise((r) => setTimeout(r, 250));
+      }
+      mgr.patchApp(existing.id, {
+        status: 'queued',
+        profileId: profile.id,
+        profile: snap ? { label: profile.label, values: profile.values } : null,
+        resumeId: resume ? resume.id : existing.resumeId || null,
+        resumeName: resume ? resume.name : existing.resumeName || null,
+        pendingSubmitUntil: null,
+      }, { type: 'step', message: `Sent again from your phone — ${auto ? 'applying on autopilot' : 'opening it to review'}${profile.id !== 'main' ? ` for ${profile.label}` : ''}` });
+      this.notify('Retrying a job from your phone', `${merged.title} at ${merged.company} — ${auto ? 'applying on autopilot' : 'opening it to review'}`);
+      mgr.applyApplication(existing.id, { mode: auto ? 'auto' : 'review' }).catch(() => {});
+      return;
     }
-    await this.api('DELETE', `/api/items/outbox/${encodeURIComponent(it.id)}`).catch(() => {});
+
+    if (!job.title) return;
+    const resume = mgr.resumeFor(profile.id, { resumeId: v.resumeId, job });
+    const match = scoreJob(job, { resumeText: resume ? resume.text : '', profile: profile.values });
+    const app = mgr.createApplication({ job, match, resume, campaign: null, status: 'queued', profileId: profile.id, profile: snap ? { label: profile.label, values: profile.values } : null });
+    mgr.patchApp(app.id, { campaignName: 'Sent from phone' }, { type: 'step', message: `Sent from your phone${profile.id !== 'main' ? ` for ${profile.label}` : ''}` });
+    if (resume && resume.profileId && resume.profileId !== profile.id) {
+      // The resume was chosen on the phone even though it is tagged for another profile: allowed, but say so.
+      mgr.patchApp(app.id, {}, { type: 'warn', message: `"${resume.name || resume.fileName}" is tagged for a different profile than this application (${profile.label})` });
+    }
+    // "auto" = apply now on autopilot (cancel window, scam and still-open checks still apply);
+    // anything else waits in the Review queue so pre-filled tabs don't pile up while you're away.
+    this.notify('Job sent from your phone', `${job.title} at ${job.company} — ${auto ? 'applying on autopilot' : 'waiting in your Review queue'}`);
+    if (auto) mgr.applyApplication(app.id, { mode: 'auto' }).catch(() => {});
   }
 }
 

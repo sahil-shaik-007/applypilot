@@ -8,6 +8,7 @@ import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, Logo, ScoreRing, StatusBadge, Seg, timeAgo, salary, stagger, CopyRow, copyText, downloadFile, Markdown } from './ui.jsx';
 import { AUTO_ATS, saveJob, unsaveJob, sendToLaptop, skipJob, upsertApplication, openExternal, findApplication } from '../lib/apply.js';
 import { allProfiles, getProfile, pickResumeFor, resumePool, profileIdForJob } from '../lib/profiles.js';
+import { qaVisibleTo } from '../lib/answers.js';
 import { safeId } from '../lib/sync.js';
 import { coverLetter, tailorResume, outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
 import { canApplyInApp, openUrl } from '../lib/bridge.js';
@@ -408,7 +409,7 @@ export function QuickFillSheet({ open, job, resumeId, profileId, onClose }) {
   ], [p, name, exp, edu]);
   const f = filter.trim().toLowerCase();
   const match = (k, v) => !f || k.toLowerCase().includes(f) || String(Array.isArray(v) ? v.join(' ') : v ?? '').toLowerCase().includes(f);
-  const answers = app.qa.filter((q) => q.answer && match(q.question, q.answer));
+  const answers = qaVisibleTo(app.qa, getProfile(app, profileId).id).filter((q) => q.answer && match(q.question, q.answer));
   const empty = !Object.keys(p).length;
 
   const downloadResume = async () => {

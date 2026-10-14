@@ -69,6 +69,14 @@ export function profileIdForJob(app, job) {
   return DEFAULT_PROFILE_ID;
 }
 
+/** Profile one application is for: its own, else its campaign's, else the default profile. */
+export function profileIdOfApplication(app, a) {
+  if (!a) return DEFAULT_PROFILE_ID;
+  if (a.profileId) return a.profileId;
+  const c = a.campaignId && app && app.sync ? app.sync.get('campaigns', a.campaignId) : null;
+  return (c && c.profileId) || DEFAULT_PROFILE_ID;
+}
+
 /** Resume group used to scope "default": resumes of one profile, or the shared group. */
 export const resumeGroup = (r) => r.profileId || 'shared';
 

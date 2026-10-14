@@ -19,7 +19,23 @@ function similarity(a, b) {
 
 // The questions an application still lists, one row per question text (same merge the apply engine does).
 // Empty questions get a visible label, so no blank rows. The card count and the card list both come from here.
-function questionsFor(a, bank, qa) {
+// Answers are per profile: this application's profile uses its own answers first, then the shared ones, never another profile's.
+const profileOf = (a) => a.profileId || 'main';
+function visibleFor(a, qa) { const pid = profileOf(a); return qa.filter((q) => !q.profileId || q.profileId === pid); }
+function bankFor(a, qa) {
+  const pid = profileOf(a);
+  const rank = (q) => (q.answer ? 2 : 0) + (q.profileId === pid ? 1 : 0);
+  const m = new Map();
+  for (const q of visibleFor(a, qa)) {
+    const k = normQ(q.question);
+    if (k && (!m.has(k) || rank(q) > rank(m.get(k)))) m.set(k, q);
+  }
+  return m;
+}
+function questionsFor(a, allQa) {
+  const pid = profileOf(a);
+  const qa = visibleFor(a, allQa).slice().sort((x, y) => (y.profileId === pid) - (x.profileId === pid)); // own first
+  const bank = bankFor(a, allQa);
   const seen = new Set();
   const out = [];
   for (const u of a.unanswered || []) {
@@ -43,7 +59,7 @@ function questionsFor(a, bank, qa) {
 }
 
 // One open or answered question on a Review queue card: answer it, change the saved answer, clear it, or dismiss it.
-function QuestionRow({ appId, q }) {
+function QuestionRow({ appId, profileId, q }) {
   const app = useApp();
   const saved = (q.bank && q.bank.answer) || '';
   const [draft, setDraft] = useState(saved);
@@ -52,7 +68,7 @@ function QuestionRow({ appId, q }) {
   const save = async () => {
     if (!canSave) return;
     const val = draft.trim();
-    const item = q.bank ? { id: q.bank.id, question: q.bank.question, answer: val } : { question: q.raw, answer: val };
+    const item = q.bank ? { id: q.bank.id, question: q.bank.question, answer: val } : { question: q.raw, answer: val, profileId: profileId || 'main' };
     try { app.set({ qa: await app.run('qa:save', [item], 'Answer saved — reused on every form that asks this') }); } catch { /* the toast explains */ }
   };
   const clear = async () => {
@@ -62,12 +78,13 @@ function QuestionRow({ appId, q }) {
   const dismiss = async () => {
     try { await app.run('applications:dismissQuestion', [appId, q.raw], 'Question dismissed from this application'); } catch { /* the toast explains */ }
   };
+  const multi = (app.profiles || []).length > 1;
   const opts = saved && !q.options.includes(saved) ? [saved, ...q.options] : q.options;
   return (
     <div style={{ borderLeft: `3px solid ${q.answered ? 'var(--green)' : 'var(--amber)'}`, paddingLeft: 12 }}>
       <div className="row between" style={{ alignItems: 'flex-start', gap: 10 }}>
         <div style={{ fontWeight: 600 }}>{q.label}{q.required && <span className="muted"> *</span>}</div>
-        <span className={`badge ${q.answered ? 'green' : 'amber'}`}>{q.answered ? 'Answered · in your Answer bank' : 'Open'}</span>
+        <span className={`badge ${q.answered ? 'green' : 'amber'}`}>{q.answered ? (q.bank && !q.bank.profileId && multi ? 'Answered · shared answer' : 'Answered · in your Answer bank') : 'Open'}</span>
       </div>
       {q.hint && <div className="tiny muted" style={{ marginTop: 4 }}>{q.hint}</div>}
       {!q.raw && <div className="tiny muted" style={{ marginTop: 4 }}>ApplyPilot did not record this field's question. Answer it on the form, then dismiss it here.</div>}
@@ -100,15 +117,8 @@ export default function ReviewQueue() {
   const queued = useMemo(() => app.applications.filter((a) => a.status === 'queued' && (camp === 'all' || a.campaignId === camp)).sort((a, b) => (b.score || 0) - (a.score || 0)), [app.applications, camp]);
   const queuedCampaigns = useMemo(() => [...new Set(app.applications.filter((a) => a.status === 'queued').map((a) => a.campaignId))].map((id) => app.campaigns.find((c) => c.id === id) || { id, name: 'Manual' }), [app.applications, app.campaigns]);
   const pendingQ = app.qa.filter((q) => !q.answer).length;
-  // Answer bank by normalised question text; a saved answer wins over an empty entry for the same question.
-  const bank = useMemo(() => {
-    const m = new Map();
-    for (const q of app.qa) {
-      const k = normQ(q.question);
-      if (k && (!m.has(k) || (!m.get(k).answer && q.answer))) m.set(k, q);
-    }
-    return m;
-  }, [app.qa]);
+  const multiProfiles = (app.profiles || []).length > 1;
+  const profileLabel = (a) => (multiProfiles ? ((app.profiles || []).find((p) => p.id === (a.profileId || 'main')) || {}).label || (a.profile && a.profile.label) || '' : '');
   const [qOpen, setQOpen] = useState(new Set());
   const [, tick] = useState(0);
   const submitting = app.applications.filter((a) => a.pendingSubmitUntil && new Date(a.pendingSubmitUntil) > new Date());
@@ -162,7 +172,7 @@ export default function ReviewQueue() {
           <div className="col">
             <AnimatePresence>
               {needs.slice(0, 100).map((a) => {
-                const qs = questionsFor(a, bank, app.qa);
+                const qs = questionsFor(a, app.qa);
                 const openN = qs.filter((q) => !q.answered).length;
                 const expanded = qOpen.has(a.id);
                 const toggleQ = () => setQOpen((s) => { const n = new Set(s); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n; });
@@ -172,7 +182,7 @@ export default function ReviewQueue() {
                       <Logo name={a.job.company} src={a.job.companyLogo} size="sm" />
                       <div className="grow">
                         <div style={{ fontWeight: 700 }} className="ellipsis">{a.job.title} <span className="muted" style={{ fontWeight: 400 }}>· {a.job.company}</span></div>
-                        <div className="small muted ellipsis">{(a.events || []).slice(-1)[0]?.message || 'Review and submit'}{qs.length ? (openN ? ` · ${openN} unanswered question(s)` : ` · all ${qs.length} questions answered`) : ''}</div>
+                        <div className="small muted ellipsis">{profileLabel(a) ? `For ${profileLabel(a)} · ` : ''}{(a.events || []).slice(-1)[0]?.message || 'Review and submit'}{qs.length ? (openN ? ` · ${openN} unanswered question(s)` : ` · all ${qs.length} questions answered`) : ''}</div>
                       </div>
                       {qs.length > 0 && <Button size="sm" variant="ghost" icon={MessageSquareText} onClick={toggleQ}>{expanded ? 'Hide questions' : `Answer${openN ? ` (${openN})` : ''}`}</Button>}
                       <Button size="sm" icon={ExternalLink} onClick={() => app.run('browser:open', [a.job.applyUrl || a.job.url])}>Open & finish</Button>
@@ -182,7 +192,7 @@ export default function ReviewQueue() {
                     </div>
                     {expanded && qs.length > 0 && (
                       <div className="col" style={{ gap: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-                        {qs.map((q) => <QuestionRow key={q.key || 'blank'} appId={a.id} q={q} />)}
+                        {qs.map((q) => <QuestionRow key={q.key || 'blank'} appId={a.id} profileId={a.profileId} q={q} />)}
                       </div>
                     )}
                   </motion.div>
@@ -226,11 +236,11 @@ export default function ReviewQueue() {
                         <div className="small muted ellipsis">{a.job.company} · {a.job.location || (a.job.remote ? 'Remote' : '')} {AUTO_ATS.includes(a.job.ats) && <Zap size={11} color="var(--green)" />}</div>
                       </td>
                       <td className="small">{salary(a.job)}</td>
-                      <td className="small muted">{a.campaignName}</td>
+                      <td className="small muted">{a.campaignName}{profileLabel(a) ? <div className="tiny dim">{profileLabel(a)}</div> : null}</td>
                       <td className="small"><span className="badge" title={`Found on ${(app.connectors.find((c) => c.id === a.job.source) || {}).name || a.job.source || 'an unknown source'}`}>{(app.connectors.find((c) => c.id === a.job.source) || {}).name || a.job.source || 'Other'}</span></td>
                       <td>
                         <select className="select" style={{ height: 30, fontSize: 13, width: 170 }} value={a.resumeId || ''} onChange={(e) => setResume(a.id, e.target.value)}>
-                          {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          {app.resumes.filter((r) => !r.profileId || r.profileId === (a.profileId || 'main') || r.id === a.resumeId).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                         </select>
                       </td>
                       <td className="small dim">{timeAgo(a.createdAt)}</td>

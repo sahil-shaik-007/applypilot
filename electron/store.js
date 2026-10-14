@@ -67,7 +67,7 @@ function createStore(baseDir) {
     campaigns: c('campaigns', { items: [] }),
     jobs: c('jobs', { items: {} }), // id -> job (+ score, campaignIds, firstSeen)
     applications: c('applications', { items: [] }),
-    qa: c('qa', { items: [] }), // { id, question, answer, uses, updatedAt }
+    qa: c('qa', { items: [] }), // { id, question, answer, uses, updatedAt, profileId? } (no profileId = shared with every profile)
     activity: c('activity', { items: [] }),
     license: c('license', { key: null }),
     platforms: c('platform-usage', { used: {} }),
@@ -92,6 +92,19 @@ function createStore(baseDir) {
   store.resumesFor = (id) => {
     const pid = id && id !== 'main' ? String(id) : 'main';
     return store.resumes.get().items.filter((r) => !r.profileId || r.profileId === pid);
+  };
+  // Every profile, main first: [{ id, label, isDefault }]. Values are not included (see resolveProfile).
+  store.profileList = () => [
+    { id: 'main', label: 'Main profile', isDefault: true },
+    ...store.profiles.get().items.map((p) => ({ id: p.id, label: p.label || 'Profile', isDefault: false })),
+  ];
+  // True when id is 'main' or an extra profile that exists on this PC.
+  store.hasProfile = (id) => !id || id === 'main' || store.profiles.get().items.some((p) => p.id === String(id));
+  // Answer-bank records one profile may use: its own (profileId === id) and shared ones (no profileId).
+  // Never another profile's. Records written before profiles existed have no profileId, so they stay shared.
+  store.qaFor = (id) => {
+    const pid = id && id !== 'main' ? String(id) : 'main';
+    return store.qa.get().items.filter((q) => !q.profileId || q.profileId === pid);
   };
   store.flushAll = () => Object.values(store).forEach((v) => v instanceof Collection && v.flush());
   return store;

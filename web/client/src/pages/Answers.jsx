@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquareText, Plus, Pencil, Trash2, Search, Bot, User, CircleHelp, Copy } from 'lucide-react';
+import { MessageSquareText, Plus, Pencil, Trash2, Search, Bot, User, CircleHelp, Copy, Users } from 'lucide-react';
 import { newId } from '@shared/vaultCrypto.js';
 import { useApp } from '../lib/store.jsx';
 import { Button, Empty, Sheet, Seg, Field, timeAgo, copyText } from '../components/ui.jsx';
+import { allProfiles } from '../lib/profiles.js';
+import { qaScope, qaScopeLabel } from '../lib/answers.js';
 
 const COMMON = [
   'Why do you want to work at this company?',
@@ -20,6 +22,8 @@ const COMMON = [
 
 function Editor({ state, onClose }) {
   const app = useApp();
+  const profiles = allProfiles(app);
+  const [scope, setScope] = useState(state ? qaScope(state) || '' : '');
   const [q, setQ] = useState(state ? state.question || '' : '');
   const [a, setA] = useState(state ? state.answer || '' : '');
   const [busy, setBusy] = useState(false);
@@ -29,7 +33,7 @@ function Editor({ state, onClose }) {
     setBusy(true);
     try {
       const id = state.id || newId();
-      await app.put('qa', id, { ...(state.id ? state : {}), id, question: q.trim(), answer: a, source: state.source && state.source !== 'pending' ? state.source : (a ? 'user' : 'pending'), uses: state.uses || 0, updatedAt: new Date().toISOString() });
+      await app.put('qa', id, { ...(state.id ? state : {}), id, question: q.trim(), answer: a, source: state.source && state.source !== 'pending' ? state.source : (a ? 'user' : 'pending'), profileId: scope || null, uses: state.uses || 0, updatedAt: new Date().toISOString() });
       app.toast(isNew ? 'Answer added' : 'Answer saved', 'success');
       onClose();
     } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(false); }
@@ -40,6 +44,13 @@ function Editor({ state, onClose }) {
       <div className="col" style={{ gap: 14 }}>
         <Field label="Question"><textarea className="textarea" rows={2} value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. What is your notice period?" data-testid="qa-question" /></Field>
         {isNew && !q && <div className="chips">{COMMON.filter((c) => !app.qa.some((x) => x.question === c)).slice(0, 6).map((c) => <button type="button" key={c} className="chip" onClick={() => setQ(c)}>+ {c}</button>)}</div>}
+        <Field label="Used by" help={scope ? 'Only this profile uses this answer. A shared answer is used by every profile that has no answer of its own.' : 'Every profile uses this answer unless it has its own answer to the same question.'}>
+          <select className="select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Used by" data-testid="qa-scope">
+            <option value="">All profiles (shared)</option>
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+            {scope && !profiles.some((p) => p.id === scope) && <option value={scope}>Removed profile</option>}
+          </select>
+        </Field>
         <Field label="Your answer" help="Reused by quick-fill on your phone and by the desktop app on every form that asks this."><textarea className="textarea" rows={5} value={a} onChange={(e) => setA(e.target.value)} placeholder="Type your answer once" data-testid="qa-answer" /></Field>
       </div>
     </Sheet>
@@ -51,11 +62,16 @@ export default function Answers() {
   const [edit, setEdit] = useState(null);
   const [text, setText] = useState('');
   const [filter, setFilter] = useState('all');
+  const [scope, setScope] = useState('all'); // 'all' | 'shared' | a profile id (its own answers and the shared ones)
+  const profiles = allProfiles(app);
+  const scoped = useMemo(() => app.qa.filter((q) => scope === 'all' || (scope === 'shared' ? !q.profileId : (!q.profileId || q.profileId === scope))), [app.qa, scope]);
   const list = useMemo(() => {
     const t = text.toLowerCase();
-    return app.qa.filter((q) => (filter === 'all' || (filter === 'pending' ? !q.answer : !!q.answer)) && (!t || `${q.question} ${q.answer}`.toLowerCase().includes(t)));
-  }, [app.qa, text, filter]);
-  const pending = app.qa.filter((q) => !q.answer).length;
+    return scoped.filter((q) => (filter === 'all' || (filter === 'pending' ? !q.answer : !!q.answer)) && (!t || `${q.question} ${q.answer}`.toLowerCase().includes(t)));
+  }, [scoped, text, filter]);
+  const pending = scoped.filter((q) => !q.answer).length;
+  const scopeProfile = profiles.find((p) => p.id === scope);
+  const showScope = profiles.length > 1 || app.qa.some((q) => q.profileId && q.profileId !== 'main');
   const del = async (q) => {
     if (!(await app.confirm({ title: 'Delete answer?', message: `"${q.question}" will be removed from your answer bank on every device.` }))) return;
     try { await app.remove('qa', q.id); app.toast('Answer deleted', 'success'); } catch (e) { app.toast(e.message, 'error'); }
@@ -64,9 +80,19 @@ export default function Answers() {
     <div className="col" style={{ gap: 14 }}>
       <div className="row" style={{ gap: 8 }}>
         <div className="search-wrap grow"><Search size={16} /><input className="input" style={{ height: 44 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Search answers" aria-label="Search answers" /></div>
-        <Button variant="primary" icon={Plus} onClick={() => setEdit({})} data-testid="qa-add">Add</Button>
+        <Button variant="primary" icon={Plus} onClick={() => setEdit(scope !== 'all' && scope !== 'shared' ? { profileId: scope } : {})} data-testid="qa-add">Add</Button>
       </div>
-      {pending > 0 && <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'pending', label: `Needs answer · ${pending}` }, { value: 'done', label: 'Answered' }]} />}
+      {showScope && (
+        <div className="col" style={{ gap: 4 }}>
+          <select className="select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Show answers for" data-testid="qa-scope-filter">
+            <option value="all">All answers ({app.qa.length})</option>
+            <option value="shared">Shared with all profiles ({app.qa.filter((q) => !q.profileId).length})</option>
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''} ({app.qa.filter((q) => !q.profileId || q.profileId === p.id).length})</option>)}
+          </select>
+          {scopeProfile && <div className="tiny dim">Showing what {scopeProfile.label} uses: its own answers first, then the shared ones.</div>}
+        </div>
+      )}
+      {(pending > 0 || filter !== 'all') && <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'pending', label: `Needs answer · ${pending}` }, { value: 'done', label: 'Answered' }]} />}
       <AnimatePresence initial={false}>
         {list.map((q) => {
           const src = q.source === 'ai' ? { icon: Bot, label: 'AI', cls: 'accent' } : !q.answer ? { icon: CircleHelp, label: 'Needs answer', cls: 'amber' } : { icon: User, label: 'You', cls: 'green' };
@@ -74,7 +100,10 @@ export default function Answers() {
             <motion.div key={q.id} layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 30 }} className="card pad" style={!q.answer ? { borderColor: 'rgba(251,191,36,.35)' } : null} data-testid="qa-card">
               <div className="row between" style={{ alignItems: 'flex-start' }}>
                 <div style={{ fontWeight: 700 }} className="break grow">{q.question}</div>
-                <span className={`badge ${src.cls}`}><src.icon size={11} />{src.label}</span>
+                <span className="row" style={{ gap: 4, flexShrink: 0 }}>
+                  {showScope && <span className="badge" data-testid="qa-scope-badge">{q.profileId ? <User size={11} /> : <Users size={11} />}{qaScopeLabel(app, q)}</span>}
+                  <span className={`badge ${src.cls}`}><src.icon size={11} />{src.label}</span>
+                </span>
               </div>
               {q.answer ? <div className="small muted prewrap" style={{ marginTop: 8, maxHeight: 140, overflow: 'hidden' }}>{q.answer}</div> : <div className="small dim" style={{ marginTop: 8 }}>No answer yet. The desktop app asked this on a form.</div>}
               <div className="row between" style={{ marginTop: 10 }}>
@@ -90,7 +119,7 @@ export default function Answers() {
         })}
       </AnimatePresence>
       {!app.qa.length && <Empty icon={MessageSquareText} title="Your answer bank is empty" action={<Button icon={Plus} onClick={() => setEdit({})}>Add your first answer</Button>}>Answer common screening questions once. They show up in quick-fill and the desktop app reuses them.</Empty>}
-      {app.qa.length > 0 && !list.length && <Empty icon={Search} title="No matches">Try another search.</Empty>}
+      {app.qa.length > 0 && !list.length && <Empty icon={Search} title="No matches">{scope !== 'all' && !text && filter === 'all' ? 'No answers in this view yet.' : 'Try another search.'}</Empty>}
       <Editor key={edit ? edit.id || 'new' : 'none'} state={edit} onClose={() => setEdit(null)} />
     </div>
   );

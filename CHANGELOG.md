@@ -2,6 +2,23 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.6.0] — 2026-10-14
+
+### Added
+- **Answers belong to a profile.** The answer bank is scoped per profile (or shared with all). A profile uses its own answers first, then shared ones, never another person's. Saving an answer from a job's questions saves it for that application's profile, with a "use for all profiles" switch. Available on the phone/web and the desktop.
+- **Pending jobs.** A job that couldn't be filled stays under "Needs you" with the missing questions. Answer them, press "Review and apply", confirm in the check sheet, and the job goes back to your PC to apply. The Queue shows how many jobs are waiting for answers.
+- **Retry from the PC.** A job sent again for a profile whose application is waiting, failed or queued restarts that application instead of being ignored.
+- **Profiles on the desktop.** Switch, add, rename and delete profiles; pick the profile for a campaign, a manual apply and each resume. Per-profile "applied today" counts on the dashboard.
+- **Browser state is not shared between profiles.** Before an application form opens for a different profile than the last one, ApplyPilot clears that site's saved data (storage and cookies for that site only). Your logins on LinkedIn, Indeed, Naukri and similar sites are kept.
+- **Bridge and extension** return only the current profile's answers, and answers typed in the extension are saved for that profile.
+
+### Changed
+- When campaigns run for several profiles, each profile gets an even share of the plan's daily limit. The plan limit itself is unchanged.
+- Deleting a profile keeps its resumes and applications (open applications keep a copy of its details); its campaigns fall back to the main profile.
+
+### Tests
+- Desktop e2e 71/71; phone-to-desktop sync 13/13 (new: a second profile's job keeps its own details); feature units 18/18; apply self-test 8/8; web server tests 110.
+
 ## [1.5.0] — 2026-10-11
 
 ### Added

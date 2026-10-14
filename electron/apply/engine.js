@@ -2,7 +2,8 @@
 //
 //   const engine = new ApplyEngine({ userDataDir, getSettings, log });
 //   await engine.applyToJob({ job, profile, resume: { path, fileName, text }, coverLetterText,
-//                             mode: 'auto'|'review'|'dryrun', answerQuestion, onEvent, signal })
+//                             mode: 'auto'|'review'|'dryrun', answerQuestion, onEvent, signal,
+//                             profileKey /* profile id, default 'main' */ })
 //     → { status: 'submitted'|'filled-awaiting-user'|'needs-attention'|'failed', message,
 //         filledCount, unanswered: [{question, required}], screenshotPath, url }
 //   await engine.isAvailable() → { ok, channel, path, error }
@@ -128,11 +129,64 @@ function identityGapWarning(profile, effective, resume) {
   return `Your profile needs your ${list} before this application. Add it in Profile; ApplyPilot will not fill it from a saved browser draft.`;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Per-profile isolation of site data. All applications share one browser profile so the user's own
+// logins persist; to stop one person's saved drafts/cookies/autofill appearing in another person's
+// form we remember which profile last used each site origin and wipe that origin (only) when a
+// different profile applies there.
+// ---------------------------------------------------------------------------------------------
+const ORIGIN_MAP_FILE = 'ap-origin-profile.json';
+const ORIGIN_MAP_MAX = 600;
+// Sites the user also signs in to themselves (open-in-browser flows): never clear their cookies.
+const SESSION_SITE_RE = /(^|\.)(linkedin\.com|indeed\.[a-z.]+|naukri\.com|glassdoor\.[a-z.]+|google\.com|microsoftonline\.com|live\.com|facebook\.com)$/i;
+const STORAGE_TYPES = ['local_storage', 'session_storage', 'indexeddb', 'cache_storage', 'service_workers', 'file_systems', 'websql'];
+const DATA_STORAGE_TYPES = new Set(['local_storage', 'indexeddb', 'websql', 'file_systems', 'cache_storage', 'service_workers']);
+// Forms that are embedded in a company page live on the ATS origin; clear that origin too.
+const ATS_EMBED_ORIGINS = {
+  greenhouse: ['https://boards.greenhouse.io', 'https://job-boards.greenhouse.io'],
+  lever: ['https://jobs.lever.co'],
+  ashby: ['https://jobs.ashbyhq.com'],
+  workable: ['https://apply.workable.com'],
+  smartrecruiters: ['https://jobs.smartrecruiters.com'],
+};
+
+// 'https://host:port' for an http(s) URL, else null.
+function originOf(url) {
+  try {
+    const u = new URL(String(url));
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : null;
+  } catch { return null; }
+}
+function normalizeProfileKey(k) {
+  const s = String(k == null ? '' : k).trim();
+  return s ? s.slice(0, 120) : 'main';
+}
+function isSessionSite(origin) {
+  try { return SESSION_SITE_RE.test(new URL(origin).hostname); } catch { return false; }
+}
+// last = profileKey recorded for the origin (or null); holdsData = origin currently holds form storage/cookies.
+function clearDecision({ last, profileKey, holdsData }) {
+  if (last && last === profileKey) return { clear: false, reason: 'same-profile' };
+  if (last) return { clear: true, reason: 'other-profile' };
+  return holdsData ? { clear: true, reason: 'unknown-owner' } : { clear: false, reason: 'empty' };
+}
+// Distinct origins to prepare for a navigation target (target origin first, then known ATS embed hosts).
+function originsToPrepare(target, adapterId) {
+  const out = [];
+  const add = (o) => { if (o && !out.includes(o)) out.push(o); };
+  add(originOf(target));
+  for (const o of ATS_EMBED_ORIGINS[adapterId] || []) add(o);
+  return out;
+}
+
 class ApplyEngine {
   constructor({ userDataDir, getSettings, log } = {}) {
     this.userDataDir = userDataDir || path.join(process.cwd(), '.applypilot');
     this.getSettings = typeof getSettings === 'function' ? getSettings : () => ({});
     this.log = typeof log === 'function' ? log : () => {};
+    this._originMapCache = null;
+    this._originPages = new Map(); // origin -> Set<{ page, profileKey }>
+    this._isoChain = Promise.resolve();
     this._context = null;
     this._launching = null;
     this._sem = new Semaphore(this._settings().maxParallelBrowsers);
@@ -221,17 +275,167 @@ class ApplyEngine {
     }
   }
 
+  // ---- per-profile site-data isolation ---------------------------------------------------------
+  _originMapPath() { return path.join(this.userDataDir, 'browser-profile', ORIGIN_MAP_FILE); }
+
+  _originMap() {
+    if (this._originMapCache) return this._originMapCache;
+    let m = {};
+    try {
+      const j = JSON.parse(fs.readFileSync(this._originMapPath(), 'utf8'));
+      if (j && typeof j === 'object' && !Array.isArray(j)) m = j;
+    } catch { m = {}; }
+    this._originMapCache = m;
+    return m;
+  }
+
+  _saveOriginMap() {
+    try {
+      const m = this._originMap();
+      const keys = Object.keys(m);
+      if (keys.length > ORIGIN_MAP_MAX) {
+        keys.sort((a, b) => (m[a].at || 0) - (m[b].at || 0)).slice(0, keys.length - ORIGIN_MAP_MAX).forEach((k) => delete m[k]);
+      }
+      const p = this._originMapPath();
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      const tmp = `${p}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(m));
+      fs.renameSync(tmp, p);
+    } catch (e) { this.log(`[apply] could not save origin map: ${e.message}`); }
+  }
+
+  async _originHoldsData(page, origin, session) {
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      try {
+        const r = await cdp.send('Storage.getUsageAndQuota', { origin });
+        if ((r.usageBreakdown || []).some((b) => DATA_STORAGE_TYPES.has(b.storageType) && Number(b.usage) > 0)) return true;
+      } finally { await cdp.detach().catch(() => {}); }
+      if (!session) {
+        const cookies = await page.context().cookies([origin]);
+        if (cookies.length) return true;
+      }
+      return false;
+    } catch { return true; } // cannot tell: assume it does, so it gets cleared
+  }
+
+  async _clearOriginData(page, origin, session) {
+    const types = (session ? STORAGE_TYPES : [...STORAGE_TYPES, 'cookies']).join(',');
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      try { await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: types }); } finally { await cdp.detach().catch(() => {}); }
+    } catch (e) {
+      if (!session) {
+        // At least drop this host's cookies; the missing storage clear still counts as a failure.
+        try {
+          const host = new URL(origin).hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          await page.context().clearCookies({ domain: new RegExp(`(^|\\.)${host}$`, 'i') });
+        } catch { /* */ }
+      }
+      throw e;
+    }
+  }
+
+  // Makes `origin` safe for `profileKey`. Resolves { origin, status: 'same'|'recorded'|'cleared'|'skipped'|'failed' }.
+  async _isolateOrigin(page, origin, profileKey) {
+    const map = this._originMap();
+    const last = map[origin] && map[origin].profileKey ? String(map[origin].profileKey) : null;
+    const session = isSessionSite(origin);
+    const holdsData = last ? true : await this._originHoldsData(page, origin, session);
+    const decision = clearDecision({ last, profileKey, holdsData });
+    if (!decision.clear) {
+      if (!last) { map[origin] = { profileKey, at: Date.now() }; this._saveOriginMap(); return { origin, status: 'recorded' }; }
+      map[origin] = { profileKey, at: Date.now() };
+      return { origin, status: 'same' };
+    }
+    const others = [...(this._originPages.get(origin) || [])].filter((e) => e.profileKey !== profileKey && e.page && !e.page.isClosed());
+    if (others.length) return { origin, status: 'skipped' }; // never break another profile's open form
+    try {
+      await this._clearOriginData(page, origin, session);
+    } catch (e) {
+      this.log(`[apply] clear site data failed for ${origin}: ${String(e.message).split('\n')[0]}`);
+      return { origin, status: 'failed' };
+    }
+    map[origin] = { profileKey, at: Date.now() };
+    this._saveOriginMap();
+    return { origin, status: 'cleared' };
+  }
+
+  _trackOriginPage(page, origin, profileKey) {
+    let set = this._originPages.get(origin);
+    if (!set) { set = new Set(); this._originPages.set(origin, set); }
+    const entry = { page, profileKey };
+    set.add(entry);
+    page.once('close', () => { set.delete(entry); if (!set.size && this._originPages.get(origin) === set) this._originPages.delete(origin); });
+  }
+
+  // Prepares every origin in `origins` for `profileKey`, serialised so two tabs never race on the map file.
+  // Calls onResult(result) per origin; returns the results.
+  _isolateOrigins(page, origins, profileKey, { emit, warnings } = {}) {
+    const run = async () => {
+      const results = [];
+      for (const origin of origins) {
+        let r;
+        try { r = await this._isolateOrigin(page, origin, profileKey); } catch (e) { this.log(`[apply] isolate ${origin}: ${e.message}`); r = { origin, status: 'failed' }; }
+        results.push(r);
+        let host = origin;
+        try { host = new URL(origin).hostname; } catch { /* */ }
+        if (r.status === 'failed') {
+          const msg = `Could not clear saved data on ${host}; this site may show another profile's saved details. Check the form before submitting.`;
+          if (emit) emit('warn', msg, { origin }); else if (warnings) warnings.push(msg);
+        } else if (r.status === 'skipped') {
+          const msg = `Another profile's application is still open on ${host}, so its saved data was kept; this site may show another profile's saved details. Close that tab and apply again if you see wrong details.`;
+          if (emit) emit('warn', msg, { origin }); else if (warnings) warnings.push(msg);
+        }
+        if (r.status !== 'failed' && r.status !== 'skipped') this._trackOriginPage(page, origin, profileKey);
+      }
+      const cleared = results.filter((r) => r.status === 'cleared').map((r) => r.origin);
+      if (cleared.length && emit) emit('step', 'Cleared saved site data left by another profile', { origins: cleared });
+      else if (cleared.length) this.log(`[apply] cleared saved site data left by another profile: ${cleared.join(', ')}`);
+      return results;
+    };
+    const p = this._isoChain.then(run, run);
+    this._isoChain = p.catch(() => {});
+    return p;
+  }
+
+  // After navigation, a redirect may land on an origin that was not prepared; prepare it and reload if it was wiped.
+  async _isolateRedirect(page, prepared, profileKey, hooks) {
+    const o = originOf(page.url());
+    if (!o || prepared.includes(o)) return;
+    const results = await this._isolateOrigins(page, [o], profileKey, hooks);
+    prepared.push(o);
+    if (results.some((r) => r.status === 'cleared')) {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    }
+  }
+
   // Opens a tab in the shared browser profile. For an application page (opts.job/profile/resume given) the
   // page starts without any saved draft and identity fields are filled from the profile or resume only.
+  // opts.profileKey (default 'main') names the profile applying; site data another profile left on the
+  // application page's origin is cleared first. Plain opens (no job/profile) never touch site data.
   async openUrl(url, opts = {}) {
     const ctx = await this._ensureContext();
     const page = await ctx.newPage();
     const warnings = [];
     const adapter = this.pickAdapter(opts.job || {}, url);
-    const apply = !!(opts.job || opts.profile) && adapter.id === 'workable';
+    const applyPage = !!(opts.job || opts.profile);
+    const apply = applyPage && adapter.id === 'workable';
     if (apply && adapter.draftInitScript) await page.addInitScript(adapter.draftInitScript).catch(() => {});
     const target = apply && adapter.resolveUrl ? adapter.resolveUrl({ applyUrl: url }) : url;
+    const profileKey = normalizeProfileKey(opts.profileKey);
+    const prepared = [];
+    const hooks = { warnings };
+    if (applyPage) {
+      try {
+        const origins = originsToPrepare(target, adapter.id);
+        prepared.push(...origins);
+        await this._isolateOrigins(page, origins, profileKey, hooks);
+      } catch (e) { this.log(`[apply] openUrl isolate: ${e.message}`); }
+    }
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch((e) => this.log(`[apply] openUrl: ${e.message}`));
+    if (applyPage) await this._isolateRedirect(page, prepared, profileKey, hooks).catch((e) => this.log(`[apply] openUrl redirect isolate: ${e.message}`));
     if (apply) {
       const profile = opts.profile || {};
       const effectiveProfile = profileWithResumeIdentity(profile, opts.resume);
@@ -315,9 +519,15 @@ class ApplyEngine {
       };
 
       emit('step', `Opening ${adapter.id === 'generic' ? 'application page' : adapter.id + ' form'}`, { url: target });
+      // Another profile's saved site data (drafts, cookies, storage) on this origin must not reach this form.
+      const profileKey = normalizeProfileKey(opts.profileKey);
+      const preparedOrigins = originsToPrepare(target, adapter.id);
+      try { await this._isolateOrigins(page, preparedOrigins, profileKey, { emit }); } catch (e) { log(`isolate: ${e.message}`); }
+      throwIfAborted(signal);
       // Workable restores a saved draft from the browser profile; start from a clean page so no earlier person's values appear.
       if (adapter.draftInitScript) await page.addInitScript(adapter.draftInitScript).catch(() => {});
       await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      try { await this._isolateRedirect(page, preparedOrigins, profileKey, { emit }); } catch (e) { log(`isolate redirect: ${e.message}`); }
       await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
       throwIfAborted(signal);
       await dom.rejectCookies(page); // most privacy-preserving choice only
@@ -542,4 +752,4 @@ async function installDryRunGuards(page, log) {
   });
 }
 
-module.exports = { ApplyEngine, ADAPTERS, AUTO_SUBMIT_ATS };
+module.exports = { ApplyEngine, ADAPTERS, AUTO_SUBMIT_ATS, originOf, normalizeProfileKey, isSessionSite, clearDecision, originsToPrepare };

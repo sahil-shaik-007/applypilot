@@ -1,16 +1,19 @@
 // Live "Apply in app" progress + cancel window, tailored-resume PDF preview, campaign scheduler.
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Hand, Send, Check, CircleAlert, Loader2, FileText, Share2, ExternalLink, Trash2, RefreshCw, ShieldCheck, Sparkles, X, Pencil, MessageSquareText } from 'lucide-react';
+import { Zap, Hand, Send, Check, CircleAlert, Loader2, FileText, Share2, ExternalLink, Trash2, RefreshCw, ShieldCheck, Sparkles, X, Pencil, MessageSquareText, Laptop } from 'lucide-react';
 import { useApp, go } from '../lib/store.jsx';
-import { Button, Sheet, timeAgo } from './ui.jsx';
-import { useApplySessions, resolveSubmit, dismissSession, cancelSession, applyInApp, applyJobInApp, openQuestions, saveBankAnswer, clearOpenQuestion } from '../lib/applyFlow.js';
+import { Button, Sheet, Switch, timeAgo } from './ui.jsx';
+import { ApplyCheck } from './applyCheck.jsx';
+import { useApplySessions, resolveSubmit, dismissSession, cancelSession, applyInApp, applyJobInApp, openQuestions, saveBankAnswer, clearOpenQuestion, pendingSig } from '../lib/applyFlow.js';
+import { getProfile, profileIdOfApplication } from '../lib/profiles.js';
+import { qaScopeLabel } from '../lib/answers.js';
 import { previewPages, generateTailored, deleteTailored } from '../lib/tailored.js';
 import { saveBytes, nat } from '../lib/bridge.js';
 import { tick, resetRuntime, campaignWatchlist } from '../lib/campaigns.js';
 import { forgetJobs } from '../lib/insights.js';
 import { aiError } from '../lib/ai.js';
-import { getApplication } from '../lib/apply.js';
+import { getApplication, patchApplication } from '../lib/apply.js';
 
 /** Runs due campaigns while the app is open: on unlock, every minute while visible, and on resume. */
 export function CampaignScheduler() {
@@ -101,19 +104,23 @@ export function ApplyHost() {
 /**
  * The open questions of one application (Queue "Needs you" card and the tracker sheet). Every row can be
  * answered (saved to the answer bank), edited, or cleared; the count shown by the caller is the same list.
+ * Answers are looked up and saved for the application's profile; "Use for all profiles" shares one with everyone.
  * Returns null when nothing is open.
  */
 export function UnansweredList({ a }) {
   const app = useApp();
-  const items = useMemo(() => openQuestions(app.qa, a.unanswered), [app.qa, a.unanswered]);
+  const pid = profileIdOfApplication(app, a);
+  const who = getProfile(app, pid);
+  const items = useMemo(() => openQuestions(app.qa, a.unanswered, pid), [app.qa, a.unanswered, pid]);
   const [editKey, setEditKey] = useState(null);
   const [text, setText] = useState('');
+  const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(null);
   if (!items.length) return null;
-  const start = (it) => { setEditKey(it.key); setText(it.answerRec ? it.answerRec.answer : ''); };
+  const start = (it) => { setEditKey(it.key); setText(it.answerRec ? it.answerRec.answer : ''); setShared(!!(it.answerRec && !it.answerRec.profileId)); };
   const save = async (it) => {
     setBusy(it.key);
-    try { await saveBankAnswer(app, it, text); setEditKey(null); app.toast('Saved to your answer bank', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); }
+    try { await saveBankAnswer(app, it, text, { profileId: pid, shared }); setEditKey(null); app.toast(shared ? 'Saved for every profile' : `Saved for ${who.label}`, 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); }
   };
   const clear = async (it) => {
     setBusy(it.key);
@@ -133,12 +140,22 @@ export function UnansweredList({ a }) {
           <div key={it.key} className="col" style={{ gap: 6, padding: '8px 0', borderTop: '1px solid var(--border)' }} data-testid="open-question">
             <div className="row between" style={{ alignItems: 'flex-start', gap: 8 }}>
               <div className="small break grow" style={{ fontWeight: 600 }}>{it.question}{it.required ? ' *' : ''}</div>
-              <span className={`badge ${it.answerRec ? 'green' : 'amber'}`}>{it.answerRec ? 'Answered' : 'Needs answer'}</span>
+              <span className="row" style={{ gap: 4, flexShrink: 0 }}>
+                {it.answerRec && <span className="badge" data-testid="open-question-scope">{qaScopeLabel(app, it.answerRec)}</span>}
+                <span className={`badge ${it.answerRec ? 'green' : 'amber'}`}>{it.answerRec ? 'Answered' : 'Needs answer'}</span>
+              </span>
             </div>
             {!editing && it.answerRec && <div className="tiny muted prewrap">{it.answerRec.answer}</div>}
             {editing ? (
               <div className="col" style={{ gap: 6 }}>
-                <textarea className="textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Your answer. It is saved to your answer bank." aria-label="Answer" data-testid="open-question-answer" />
+                <textarea className="textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Your answer. It is saved to ${who.isDefault ? 'your' : `${who.label}'s`} answers.`} aria-label="Answer" data-testid="open-question-answer" />
+                <div className="row between" style={{ gap: 8 }}>
+                  <div className="grow">
+                    <div className="small" style={{ fontWeight: 600 }}>Use for all profiles</div>
+                    <div className="tiny dim">{shared ? 'Every profile uses this answer unless it has its own.' : `Only ${who.label} uses this answer.`}</div>
+                  </div>
+                  <Switch on={shared} onChange={setShared} label="Use for all profiles" />
+                </div>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                   <Button size="sm" variant="primary" icon={Check} loading={busy === it.key} disabled={!text.trim()} onClick={() => save(it)} data-testid="open-question-save">Save to answer bank</Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditKey(null)}>Cancel</Button>
@@ -154,6 +171,62 @@ export function UnansweredList({ a }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Pending-job action for an application that is waiting on you (Queue "Needs you" card, tracker sheet):
+ * "Review and apply" opens the pre-send check with the application's profile, resume and mode; on confirm the job
+ * is sent to the PC again. Afterwards the card shows "Sent to your PC" and offers no second send until the
+ * application changes (status, profile, resume or the answers to its questions). While the PC has not picked it
+ * up, "Cancel send" withdraws it.
+ */
+export function ReviewAndApply({ a }) {
+  const app = useApp();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const pid = profileIdOfApplication(app, a);
+  const items = useMemo(() => openQuestions(app.qa, a.unanswered, pid), [app.qa, a.unanswered, pid]);
+  const missing = items.filter((i) => !i.answerRec).length;
+  const queued = app.outbox.filter((o) => o.jobId === a.jobId);
+  const sig = pendingSig(app.qa, a, pid);
+  const sent = queued.length > 0 || !!(a.sentToPc && a.sentToPc.sig === sig);
+  const job = { ...a.job, id: a.jobId, match: a.match };
+  const campaign = a.campaignId ? app.sync.get('campaigns', a.campaignId) : null;
+  const rawMode = (a.mode === 'auto' || a.mode === 'review') ? a.mode : ((campaign && campaign.mode !== 'queue' && campaign.mode) || app.settings.defaultApplyMode);
+  const mode = rawMode === 'auto' ? 'auto' : 'review';
+
+  const onSent = async (item) => {
+    try {
+      const fresh = getApplication(app, a.id) || a;
+      const nsig = pendingSig(app.sync.list('qa'), fresh, profileIdOfApplication(app, fresh));
+      await patchApplication(app, a.id, { sentToPc: { at: new Date().toISOString(), outboxId: item.id, sig: nsig } }, { type: 'step', message: `Sent to your PC after your review (${item.mode === 'auto' ? 'autopilot' : 'fill, you submit'})${item.profile ? ` as ${item.profile.label}` : ''}` });
+    } catch (e) { app.toast(e.message, 'error'); }
+  };
+  const cancel = async () => {
+    setBusy(true);
+    try {
+      for (const o of queued) await app.remove('outbox', o.id);
+      await patchApplication(app, a.id, { sentToPc: null }, { type: 'step', message: 'Send to your PC cancelled' });
+      app.toast('Send cancelled', 'success');
+    } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="col" style={{ gap: 6 }} data-testid="review-apply">
+      {sent ? (
+        <div className="row between" style={{ gap: 8 }}>
+          <span className="row small" style={{ gap: 6, color: 'var(--green)', fontWeight: 600 }} data-testid="sent-to-pc"><Laptop size={14} />Sent to your PC{a.sentToPc && a.sentToPc.at ? <span className="tiny dim" style={{ fontWeight: 400 }}>· {timeAgo(a.sentToPc.at)}</span> : null}</span>
+          {queued.length > 0 && <Button size="sm" variant="ghost" icon={X} loading={busy} onClick={cancel} data-testid="cancel-send">Cancel send</Button>}
+        </div>
+      ) : (
+        <>
+          {missing > 0 && <div className="tiny" style={{ color: 'var(--amber, #fbbf24)' }} data-testid="waiting-answers">Waiting for your answers: {missing} question{missing > 1 ? 's' : ''}. Answer {missing > 1 ? 'them' : 'it'} above, or review and apply anyway.</div>}
+          <Button icon={Laptop} variant={missing ? 'outline' : 'primary'} onClick={() => setOpen(true)} data-testid="review-and-apply">Review and apply</Button>
+        </>
+      )}
+      <ApplyCheck key={mode} open={open} job={job} resumeId={a.resumeId || 'auto'} mode={mode} profileId={pid} onClose={() => setOpen(false)} onSent={onSent} />
     </div>
   );
 }

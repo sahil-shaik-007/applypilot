@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Rocket, Play, Pause, Pencil, Trash2, Plus, Loader2, FileText, Clock, Zap, Search as SearchIcon } from 'lucide-react';
 import { useApp } from '../lib/store';
+import { ProfileUsage } from '../components/profileUsage';
 import { Button, Modal, Field, TagInput, Seg, MultiChips, Empty, Progress, PeriodPicker, periodLabel, timeAgo, stagger } from '../components/ui';
 
 const PHASE = { searching: 'Searching all sources', scoring: 'Scoring matches', applying: 'Applying', sleeping: 'Waiting for next run', idle: 'Idle' };
@@ -15,7 +16,7 @@ const COLORS = ['#6366f1', '#22d3ee', '#f472b6', '#f59e0b', '#10b981', '#a78bfa'
 export function CampaignEditor({ open, onClose, initial }) {
   const app = useApp();
   const profile = app.profile.values || {};
-  const blank = { name: '', roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [], countries: [], postedWithinHours: 0, postedMonths: [] };
+  const blank = { name: '', profileId: null, roles: [], locations: profile.preferredLocations || [], remote: 'any', resumeId: 'auto', mode: 'queue', minScore: app.settings.minMatchScore || 55, dailyLimit: 25, intervalMinutes: 60, coverLetter: 'ai', sources: [], includeKeywords: [], excludeKeywords: [], excludeCompanies: [], countries: [], postedWithinHours: 0, postedMonths: [] };
   const [c, setC] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setC({ ...blank, ...(initial || {}) }); }, [open]); // eslint-disable-line
@@ -32,6 +33,10 @@ export function CampaignEditor({ open, onClose, initial }) {
   };
 
   const ready = app.connectors.filter((x) => x.ready);
+  const profiles = app.profiles || [];
+  // Resumes this campaign's profile may use: shared ones and the ones tagged for it (the chosen one always stays listed).
+  const pid = c.profileId || 'main';
+  const resumes = app.resumes.filter((r) => !r.profileId || r.profileId === pid || r.id === c.resumeId);
   return (
     <Modal open={open} onClose={onClose} title={c.id ? 'Edit campaign' : 'New campaign'} wide footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -45,6 +50,13 @@ export function CampaignEditor({ open, onClose, initial }) {
           </Field>
           <Field label="Campaign name"><input className="input" value={c.name} onChange={(e) => up('name')(e.target.value)} placeholder={c.roles[0] || 'My campaign'} /></Field>
         </div>
+        {profiles.length > 1 && (
+          <Field label="Apply as" help="Whose details, resumes and answers this campaign uses. Jobs it finds are applied to for that profile only. If you delete the profile, the campaign switches to your main profile.">
+            <select className="select" value={c.profileId || ''} onChange={(e) => up('profileId')(e.target.value || null)}>
+              {profiles.map((p) => <option key={p.id} value={p.id === 'main' ? '' : p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+            </select>
+          </Field>
+        )}
         <div className="grid g2">
           <Field label="Locations" help="Up to 3 are searched. Leave empty for anywhere."><TagInput value={c.locations} onChange={up('locations')} placeholder="Bengaluru, Remote…" /></Field>
           <Field label="Work mode"><Seg value={c.remote} onChange={up('remote')} options={[{ value: 'any', label: 'Any' }, { value: 'remote', label: 'Remote only' }, { value: 'onsite', label: 'On-site' }]} /></Field>
@@ -66,7 +78,7 @@ export function CampaignEditor({ open, onClose, initial }) {
           <Field label="Resume for this campaign" help="Auto picks the best resume per job using role tags and skills.">
             <select className="select" value={c.resumeId} onChange={(e) => up('resumeId')(e.target.value)}>
               <option value="auto">✨ Auto-pick best match per job</option>
-              {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </Field>
           <Field label="Tailor resume per job" help="AI rewrites your resume for each job using only facts already in it; anything it invents is removed automatically.">
@@ -116,6 +128,7 @@ function CampaignCard({ c, index, onEdit, onDetails }) {
   const running = c.status === 'running';
   const setDetails = (tab) => onDetails(c, tab);
   const resume = app.resumes.find((r) => r.id === c.resumeId);
+  const profileLabel = (app.profiles || []).length > 1 ? ((app.profiles.find((p) => p.id === (c.profileId || 'main')) || {}).label || 'Main profile') : '';
   const apps = app.applications.filter((a) => a.campaignId === c.id);
   const today = new Date().toISOString().slice(0, 10);
   const todayCount = apps.filter((a) => a.attemptedAt && a.attemptedAt.startsWith(today)).length;
@@ -135,6 +148,7 @@ function CampaignCard({ c, index, onEdit, onDetails }) {
               <div className="card-title ellipsis">{c.name}</div>
             </div>
             <div className="chips" style={{ marginTop: 8 }}>
+              {profileLabel && <span className="badge blue" title="This campaign applies as this profile">{profileLabel}</span>}
               {(c.roles || []).map((r) => <span key={r} className="badge accent">{r}</span>)}
               {(c.locations || []).map((l) => <span key={l} className="badge">{l}</span>)}
               {c.remote !== 'any' && <span className="badge">{c.remote}</span>}
@@ -266,6 +280,7 @@ export default function Campaigns({ params }) {
           <Button variant="primary" icon={Plus} onClick={() => setEditing({})}>New campaign</Button>
         </div>
       </div>
+      <ProfileUsage style={{ marginBottom: 16 }} />
       {app.campaigns.length ? (
         <div className="grid g2"><AnimatePresence>{app.campaigns.map((c, i) => <CampaignCard key={c.id} c={c} index={i} onEdit={setEditing} onDetails={(camp, tab) => setDetails({ c: camp, tab })} />)}</AnimatePresence></div>
       ) : (

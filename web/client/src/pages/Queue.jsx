@@ -4,10 +4,11 @@ import { Inbox, Check, X, ExternalLink, Send, Zap, CircleAlert, MessageSquareTex
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Logo, ScoreRing, Empty, Seg, timeAgo, salary } from '../components/ui.jsx';
 import { JobSheet, QuickFillSheet } from '../components/jobs.jsx';
-import { startInAppApply, UnansweredList } from '../components/apply.jsx';
+import { startInAppApply, UnansweredList, ReviewAndApply } from '../components/apply.jsx';
 import { AUTO_ATS, patchApplication, sendToLaptop, openExternal } from '../lib/apply.js';
 import { canApplyInApp } from '../lib/bridge.js';
 import { useApplySessions, resolveSubmit, openQuestions } from '../lib/applyFlow.js';
+import { profileIdOfApplication } from '../lib/profiles.js';
 
 const asJob = (a) => ({ ...a.job, id: a.jobId, match: a.match });
 
@@ -35,6 +36,11 @@ export default function Queue({ params }) {
   const needs = app.applications.filter((a) => a.status === 'awaiting-you');
   const submitting = app.applications.filter((a) => a.pendingSubmitUntil && new Date(a.pendingSubmitUntil) > new Date());
   const pendingQ = app.qa.filter((q) => !q.answer).length;
+  // Jobs on hold because a question has no answer for the profile they are for (same lists the cards show).
+  const waiting = needs.reduce((acc, a) => {
+    const n = openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).filter((i) => !i.answerRec).length;
+    return n ? { jobs: acc.jobs + 1, questions: acc.questions + n } : acc;
+  }, { jobs: 0, questions: 0 });
   useEffect(() => { if (!submitting.length) return undefined; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [submitting.length]);
   useEffect(() => { setSel((s) => new Set([...s].filter((id) => queued.some((a) => a.id === id)))); }, [queued]);
 
@@ -91,6 +97,13 @@ export default function Queue({ params }) {
         </button>
       )}
 
+      {waiting.jobs > 0 && (
+        <div className="card pad row" style={{ gap: 10, borderColor: 'rgba(251,191,36,.35)' }} data-testid="waiting-for-answers">
+          <CircleAlert size={18} color="var(--amber)" style={{ flexShrink: 0 }} />
+          <span className="grow small"><b>Waiting for your answers ({waiting.jobs})</b> <span className="muted">— {waiting.questions} question{waiting.questions > 1 ? 's' : ''} across {waiting.jobs} job{waiting.jobs > 1 ? 's' : ''}. Answer {waiting.questions > 1 ? 'them' : 'it'} below, then review and apply.</span></span>
+        </div>
+      )}
+
       {submitting.length > 0 && (
         <section className="col" style={{ gap: 8 }}>
           <div className="section-title" style={{ margin: 0 }}><Zap size={14} color="var(--green)" />About to submit ({submitting.length})</div>
@@ -119,13 +132,13 @@ export default function Queue({ params }) {
           <div className="section-title" style={{ margin: 0 }}><CircleAlert size={14} color="var(--amber)" />Needs you ({needs.length})</div>
           <AnimatePresence>
             {needs.map((a) => {
-              const openCount = openQuestions(app.qa, a.unanswered).length;
+              const openCount = openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).filter((i) => !i.answerRec).length;
               return (
               <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40 }} className="card pad col" style={{ gap: 10 }} data-testid="needs-row">
                 <div className="row" style={{ gap: 10 }}>
                   <Logo name={a.job.company} size="sm" />
                   <div className="grow"><div className="small ellipsis" style={{ fontWeight: 700 }}>{a.job.title} <span className="muted" style={{ fontWeight: 400 }}>· {a.job.company}</span></div>
-                    <div className="tiny muted ellipsis">{((a.events || []).slice(-1)[0] || {}).message || 'Review and submit'}{openCount ? ` · ${openCount} unanswered question${openCount > 1 ? 's' : ''}` : ''}</div></div>
+                    <div className="tiny muted ellipsis">{((a.events || []).slice(-1)[0] || {}).message || 'Review and submit'}{openCount ? ` · waiting for your answer${openCount > 1 ? 's' : ''} (${openCount})` : ''}</div></div>
                   <Button size="sm" variant="ghost" icon={X} aria-label="Skip this job" onClick={() => skip([a.id])} />
                 </div>
                 <div className="grid g3" style={{ gap: 6 }}>
@@ -134,6 +147,7 @@ export default function Queue({ params }) {
                   <Button size="sm" variant="primary" icon={Check} onClick={() => markApplied(a)}>I sent it</Button>
                 </div>
                 <UnansweredList a={a} />
+                <ReviewAndApply a={a} />
               </motion.div>
               );
             })}

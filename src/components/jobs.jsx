@@ -60,12 +60,19 @@ export function JobDrawer({ job, onClose }) {
   const app = useApp();
   const [tab, setTab] = useState('details');
   const [resumeId, setResumeId] = useState('auto');
+  const [profileId, setProfileId] = useState(null); // null = this job's current application profile, else main
   const [mode, setMode] = useState(app.settings.defaultApplyMode || 'review');
   const [busy, setBusy] = useState(null);
   const [aiOut, setAiOut] = useState({});
-  const application = useMemo(() => job && app.applications.find((a) => a.jobId === job.id), [job, app.applications]);
+  const profiles = app.profiles || [];
+  const multi = profiles.length > 1;
+  const forJob = useMemo(() => (job ? app.applications.filter((a) => a.jobId === job.id) : []), [job, app.applications]);
+  // The profile applying: the one picked here, else the profile of this job's latest application, else main.
+  const activeProfile = profileId || (forJob[0] ? forJob[0].profileId || 'main' : 'main');
+  const application = useMemo(() => forJob.find((a) => (a.profileId || 'main') === activeProfile) || (!multi ? forJob[0] : null) || null, [forJob, activeProfile, multi]);
   const [market, setMarket] = useState(null);
   const [people, setPeople] = useState(null);
+  useEffect(() => { setProfileId(null); }, [job && job.id]); // eslint-disable-line
   useEffect(() => { setMarket(null); setPeople(null); if (job) { app.run('insights:salary', [job.id]).then(setMarket).catch(() => {}); app.run('network:forCompany', [job.company]).then(setPeople).catch(() => {}); } }, [job && job.id]); // eslint-disable-line
   if (!job) return <Drawer open={false} onClose={onClose} />;
   const m = job.match;
@@ -74,7 +81,7 @@ export function JobDrawer({ job, onClose }) {
   const apply = async () => {
     setBusy('apply');
     try {
-      await app.run('jobs:apply', [job.id, { resumeId, mode }], mode === 'auto' ? 'Applying in the background…' : 'Opening the application and filling it in…');
+      await app.run('jobs:apply', [job.id, { resumeId, mode, ...(multi ? { profileId: activeProfile } : {}) }], mode === 'auto' ? 'Applying in the background…' : 'Opening the application and filling it in…');
     } finally { setBusy(null); }
   };
   const save = async () => { setBusy('save'); try { await app.run('jobs:save', [job.id], 'Saved to Applications'); } finally { setBusy(null); } };
@@ -180,11 +187,20 @@ export function JobDrawer({ job, onClose }) {
       {tab === 'apply' && (
         <div className="col" style={{ gap: 18 }}>
           <div className="card pad col" style={{ gap: 16 }}>
+            {multi && (
+              <div>
+                <span className="label">Apply as</span>
+                <select className="select" value={activeProfile} onChange={(e) => { setProfileId(e.target.value); setResumeId('auto'); }}>
+                  {profiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.isDefault ? ' (default)' : ''}</option>)}
+                </select>
+                <div className="tiny dim" style={{ marginTop: 4 }}>Uses this profile's details and resumes. Each profile keeps its own application for a job.</div>
+              </div>
+            )}
             <div>
               <span className="label">Resume for this application</span>
               <select className="select" value={resumeId} onChange={(e) => setResumeId(e.target.value)}>
                 <option value="auto">✨ Auto-pick best match</option>
-                {app.resumes.map((r) => <option key={r.id} value={r.id}>{r.name}{r.isDefault ? ' (default)' : ''}</option>)}
+                {app.resumes.filter((r) => !r.profileId || r.profileId === activeProfile).map((r) => <option key={r.id} value={r.id}>{r.name}{r.isDefault ? ' (default)' : ''}</option>)}
               </select>
               {!app.resumes.length && <div className="small" style={{ color: 'var(--amber)', marginTop: 6 }}>Upload a resume first in the Resumes tab.</div>}
             </div>

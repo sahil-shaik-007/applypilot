@@ -4,6 +4,7 @@ import { Send, CalendarCheck, TrendingUp, Trophy, Rocket, Check, Circle, Search,
 import { useApp } from '../lib/store';
 import { Button, CountUp, timeAgo, stagger } from '../components/ui';
 import { profileCompletion } from './Profile';
+import { ProfileUsage } from '../components/profileUsage';
 
 const DAY = 86400000;
 const isApplied = (a) => ['applied', 'interview', 'offer', 'rejected'].includes(a.status) && a.appliedAt;
@@ -106,6 +107,8 @@ export default function Dashboard() {
           </motion.div>
         ))}
       </div>
+
+      <ProfileUsage style={{ marginBottom: 20 }} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 20, alignItems: 'start' }}>
         <div className="col" style={{ gap: 20 }}>

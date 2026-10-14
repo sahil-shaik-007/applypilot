@@ -4,13 +4,15 @@ import { SquareKanban, ExternalLink, Trash2, Laptop, Search, ChevronDown, Undo2,
 import { useApp, go } from '../lib/store.jsx';
 import { Button, Sheet, Logo, StatusBadge, Empty, Seg, Markdown, timeAgo, salary, STATUS, stagger, copyText } from '../components/ui.jsx';
 import { openExternal, sendToLaptop } from '../lib/apply.js';
-import { getProfile, pickResumeFor } from '../lib/profiles.js';
+import { getProfile, pickResumeFor, profileIdOfApplication } from '../lib/profiles.js';
 import { ResumeSelect } from '../components/jobs.jsx';
-import { TailoredCard, startInAppApply, UnansweredList } from '../components/apply.jsx';
+import { TailoredCard, startInAppApply, UnansweredList, ReviewAndApply } from '../components/apply.jsx';
 import { openQuestions } from '../lib/applyFlow.js';
 import { canApplyInApp } from '../lib/bridge.js';
 import { outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
 import { importTracker, exportWorkLog, exportTrackerCsv, readCsvFile } from '../lib/trackerIo.js';
+
+const waitingCount = (app, a) => openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).filter((i) => !i.answerRec).length;
 
 const GROUPS = [
   { id: 'awaiting-you', label: 'Needs you', statuses: ['awaiting-you'], color: 'var(--amber)' },
@@ -73,9 +75,9 @@ function AppSheet({ a, onClose }) {
             <div className="card pad metric"><div className="k">From</div><div className="v small ellipsis">{a.source === 'web' ? 'Phone' : a.campaignName || 'Desktop'}</div></div>
           </div>
           {['saved', 'queued', 'failed', 'awaiting-you'].includes(a.status) && (
-            <div className={native ? 'grid g2' : 'col'} style={{ gap: 8 }}>
+            <div className={native && a.status !== 'awaiting-you' ? 'grid g2' : 'col'} style={{ gap: 8 }}>
               {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} onClick={async () => { setBusy('inapp'); try { await startInAppApply(app, { applicationId: a.id }); } finally { setBusy(null); } }} data-testid="app-apply-inapp">{a.status === 'awaiting-you' || a.status === 'failed' ? 'Retry in app' : 'Apply in app'}</Button>}
-              <Button icon={Laptop} loading={busy === 'send'} onClick={async () => { setBusy('send'); try { await sendToLaptop(app, { ...a.job, id: a.jobId, match: a.match }, { resumeId: a.resumeId || 'auto', profileId: a.profileId }); app.toast('Sent to your laptop', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } }}>Send to laptop</Button>
+              {a.status !== 'awaiting-you' && <Button icon={Laptop} loading={busy === 'send'} onClick={async () => { setBusy('send'); try { await sendToLaptop(app, { ...a.job, id: a.jobId, match: a.match }, { resumeId: a.resumeId || 'auto', profileId: a.profileId }); app.toast('Sent to your laptop', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } }}>Send to laptop</Button>}
             </div>
           )}
           <div className="grid g2">
@@ -84,7 +86,12 @@ function AppSheet({ a, onClose }) {
             <label className="field"><span className="label">Interview</span>
               <input type="datetime-local" className="input" value={(a.interviewAt || '').slice(0, 16)} onChange={(e) => update({ interviewAt: e.target.value || null }, 'Interview date saved')} /></label>
           </div>
-          {openQuestions(app.qa, a.unanswered).length > 0 && <div className="card pad"><UnansweredList a={a} /></div>}
+          {(openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).length > 0 || a.status === 'awaiting-you') && (
+            <div className="card pad col" style={{ gap: 10 }}>
+              <UnansweredList a={a} />
+              {a.status === 'awaiting-you' && <ReviewAndApply a={a} />}
+            </div>
+          )}
           <TailoredCard job={{ ...a.job, id: a.jobId }} resumeId={a.resumeId || 'auto'} applicationId={a.id} />
           {a.coverLetter && <div className="card pad"><div className="row between"><div className="section-title" style={{ margin: 0 }}>Cover letter</div><Button size="sm" variant="ghost" icon={Copy} aria-label="Copy cover letter" onClick={async () => { await copyText(a.coverLetter); app.toast('Copied', 'success'); }} /></div><div className="small prewrap" style={{ marginTop: 6 }}>{a.coverLetter}</div></div>}
           {['applied', 'interview'].includes(a.status) && (
@@ -198,7 +205,7 @@ export default function Applied({ params }) {
                     <Logo name={a.job.company} size="sm" />
                     <div className="grow">
                       <div className="small ellipsis" style={{ fontWeight: 700 }}>{a.job.title}</div>
-                      <div className="tiny dim ellipsis">{a.job.company} · {timeAgo(a.updatedAt)}{a.notes ? ' · 📝' : ''}</div>
+                      <div className="tiny dim ellipsis">{a.job.company} · {timeAgo(a.updatedAt)}{a.notes ? ' · 📝' : ''}{a.status === 'awaiting-you' && waitingCount(app, a) ? ` · waiting for your answer${waitingCount(app, a) > 1 ? 's' : ''} (${waitingCount(app, a)})` : ''}</div>
                     </div>
                     {g.id === 'skipped' ? <Button size="sm" variant="ghost" icon={Undo2} aria-label="Un-skip" onClick={(e) => { e.stopPropagation(); unskip(a); }} /> : <StatusBadge status={a.status} />}
                   </motion.div>

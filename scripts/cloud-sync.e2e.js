@@ -147,6 +147,21 @@ async function phone(method, p, body, raw) {
       const left = (await phone('GET', '/api/items?collection=outbox')).data.items.filter((i) => !i.deleted);
       assert(!left.length, 'outbox item not removed after pickup');
     });
+    await check('a job sent for a second profile keeps the details of that profile, separate from the first', async () => {
+      const job = { id: 'greenhouse:test-456', title: 'Data Analyst', company: 'Acme Analytics', location: 'Remote', remote: true, url: 'https://example.com/job2', applyUrl: 'https://example.com/job2', source: 'greenhouse', description: 'SQL and Python.' };
+      const mine = vc.newId(); const bro = vc.newId();
+      const base = { jobId: job.id, job, resumeId: null, mode: 'review', createdAt: Date.now(), from: 'web' };
+      const send = async (id, body) => phone('PUT', `/api/items/outbox/${id}`, { ciphertext: await vc.encryptJSON(dek, body, vc.aadFor(userId, 'outbox', id)), baseVersion: null });
+      await send(mine, { ...base, profileId: 'main', profile: { label: 'Me', values: { firstName: 'Ava', lastName: 'Tester', email: 'ava@example.com' } } });
+      await send(bro, { ...base, profileId: 'bro1', profile: { label: 'Brother', values: { firstName: 'Ben', lastName: 'Tester', email: 'ben@example.com' } } });
+      await call('cloud:sync');
+      const apps = (await call('applications:list')).filter((x) => x.jobId === job.id);
+      assert(apps.length === 2, `expected one application per profile, got ${apps.length}`);
+      const m = apps.find((x) => (x.profileId || 'main') === 'main');
+      const b = apps.find((x) => x.profileId === 'bro1');
+      assert(m && m.profile && m.profile.values.firstName === 'Ava', 'first profile details missing');
+      assert(b && b.profile && b.profile.values.firstName === 'Ben' && b.profile.values.email === 'ben@example.com', 'second profile details missing');
+    });
     await check('a profile edit on the phone reaches the desktop', async () => {
       const { data } = await phone('GET', '/api/items?collection=profile');
       const cur = data.items[0];

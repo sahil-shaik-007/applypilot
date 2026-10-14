@@ -32,6 +32,7 @@ const PORTS = Array.from({ length: 11 }, (_, i) => 47823 + i); // 47823-47833
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_CODE_ATTEMPTS = 5;
 const RATE_PER_MIN = 240;
+let lastAutofillProfile = null; // profile of the application the extension last asked about
 const LIMITS = { default: 64 * 1024, '/jobs': 512 * 1024, '/score': 512 * 1024, '/answers': 256 * 1024 };
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 const EXT_ORIGIN = /^chrome-extension:\/\/([a-p]{32})$/;
@@ -294,7 +295,10 @@ async function startBridge(opts = {}) {
       const apps = store.applications.get().items || [];
       const app = wantUrl ? apps.find((a) => a.job && [a.job.applyUrl, a.job.url].some((u) => canon(u) && canon(u) === wantUrl)) : null;
       const profile = (app && app.profile && app.profile.values) || getProfile() || {};
-      const answers = (getAnswers() || []).filter((x) => x && x.question && x.answer).slice(0, 1000)
+      lastAutofillProfile = app ? (app.profileId || 'main') : 'main';
+      // Only this profile's answers (plus shared ones): another person's answers never reach the page.
+      const visibleAnswers = typeof store.qaFor === 'function' ? store.qaFor(lastAutofillProfile) : (getAnswers() || []);
+      const answers = (visibleAnswers || []).filter((x) => x && x.question && x.answer).slice(0, 1000)
         .map((x) => ({ id: x.id, question: str(x.question, 500), answer: typeof x.answer === 'string' ? x.answer.slice(0, 5000) : x.answer, options: Array.isArray(x.options) ? x.options.slice(0, 50) : [] }));
       const items = store.resumes.get().items || [];
       const job = { title: str(q.get('title'), 300), description: str(q.get('keywords'), 2000), company: str(q.get('company'), 200) };
@@ -335,7 +339,9 @@ async function startBridge(opts = {}) {
             Object.assign(cur, { answer, options: options.length ? options : cur.options || [], source: 'browser', updatedAt: now() });
             updated++;
           } else {
-            d.items.unshift({ id: crypto.randomUUID(), question, answer, options, source: 'browser', uses: 0, updatedAt: now() });
+            const rec = { id: crypto.randomUUID(), question, answer, options, source: 'browser', uses: 0, updatedAt: now() };
+            if (lastAutofillProfile) rec.profileId = lastAutofillProfile; // typed while filling this person's form
+            d.items.unshift(rec);
             added++;
           }
         }

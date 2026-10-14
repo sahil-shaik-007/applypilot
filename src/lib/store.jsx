@@ -49,7 +49,8 @@ export function AppProvider({ children }) {
         default: return s;
       }
     });
-    if (channel === 'cloud:pulled') api.call('app:bootstrap').then((b) => setState((s) => ({ ...s, profile: b.profile, qa: b.qa, applications: b.applications, resumes: b.resumes })));
+    if (channel === 'cloud:pulled') api.call('app:bootstrap').then((b) => setState((s) => ({ ...s, profile: b.profile, profiles: b.profiles, profileLabels: b.profileLabels, qa: b.qa, applications: b.applications, resumes: b.resumes })));
+    if (channel === 'profiles:changed') api.call('app:bootstrap').then((b) => setState((s) => ({ ...s, profile: b.profile, profiles: b.profiles, profileLabels: b.profileLabels })));
     if (channel === 'resumes:changed') api.call('resumes:list').then((resumes) => setState((s) => ({ ...s, resumes })));
     if (channel === 'qa:pending') api.call('qa:list').then((qa) => setState((s) => ({ ...s, qa })));
   }), []);

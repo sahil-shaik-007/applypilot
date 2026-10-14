@@ -213,6 +213,9 @@ function registerIpc() {
     version: app.getVersion(),
     settings: publicSettings(),
     profile: store.profile.get(),
+    // Every profile, main first: [{ id, label, isDefault }] (values come from profiles:list).
+    profiles: store.profileList(),
+    profileLabels: Object.fromEntries(store.profileList().map((p) => [p.id, p.label])),
     profileSchema: PROFILE_SCHEMA,
     resumes: store.resumes.get().items.map(({ text, ...r }) => ({ ...r, skills: (r.skills || []).map(displaySkill), textLength: (text || '').length })),
     campaigns: store.campaigns.get().items,
@@ -253,6 +256,87 @@ function registerIpc() {
   // profile
   handle('profile:save', (values) => store.profile.set({ values, updatedAt: new Date().toISOString() }));
 
+  // Several profiles: 'main' (the record above) plus the extra people in store.profiles.
+  // Shape of every entry: { id, label, isDefault, values, createdAt, updatedAt, counts: { resumes, campaigns, applications, answers } }
+  const profilesOut = () => store.profileList().map((p) => {
+    const main = p.id === 'main';
+    const rec = main ? store.profile.get() : store.profiles.get().items.find((x) => x.id === p.id) || {};
+    const appProfile = (a) => manager.appProfileId(a);
+    return {
+      ...p,
+      values: rec.values || {},
+      createdAt: rec.createdAt || null,
+      updatedAt: rec.updatedAt || null,
+      counts: {
+        resumes: store.resumes.get().items.filter((r) => r.profileId === p.id).length,
+        campaigns: store.campaigns.get().items.filter((c) => store.resolveProfile(c.profileId).id === p.id).length,
+        applications: store.applications.get().items.filter((a) => appProfile(a) === p.id).length,
+        answers: store.qa.get().items.filter((q) => q.profileId === p.id).length,
+      },
+    };
+  });
+  handle('profiles:list', () => profilesOut());
+  // profiles:save({ id?, label?, values? }) -> { saved: <entry>, profiles: <entries> }
+  //   no id (or 'new'): creates an extra profile; id 'main': saves the main profile's values (its label is fixed);
+  //   otherwise: renames and/or saves the values of that extra profile. Values replace the whole values object.
+  handle('profiles:save', (p = {}) => {
+    const now = new Date().toISOString();
+    const label = typeof p.label === 'string' ? p.label.trim().slice(0, 60) : undefined;
+    let id = p.id && p.id !== 'new' ? String(p.id) : null;
+    if (id === 'main') {
+      if (p.values && typeof p.values === 'object') store.profile.set({ values: p.values, updatedAt: now });
+    } else if (!id) {
+      if (store.profiles.get().items.length >= 9) throw new Error('You can keep up to 10 profiles.');
+      id = crypto.randomUUID();
+      store.profiles.update((d) => { d.items.push({ id, label: label || 'New profile', values: (p.values && typeof p.values === 'object') ? p.values : {}, createdAt: now, updatedAt: now }); });
+    } else {
+      let found = false;
+      store.profiles.update((d) => {
+        const cur = d.items.find((x) => x.id === id);
+        if (!cur) return;
+        found = true;
+        if (label) cur.label = label;
+        if (p.values && typeof p.values === 'object') cur.values = p.values;
+        cur.updatedAt = now;
+      });
+      if (!found) throw new Error('Profile not found');
+    }
+    const profiles = profilesOut();
+    return { saved: profiles.find((x) => x.id === id), profiles };
+  });
+  // Deleting an extra profile keeps its resumes and applications (applications that are still open keep a copy of
+  // the profile so they stay for the right person), sends its campaigns back to the main profile and leaves its
+  // answers in the answer bank (shown as "Removed profile" so they can be shared or deleted).
+  handle('profiles:delete', (id) => {
+    const pid = String(id || '');
+    if (!pid || pid === 'main') throw new Error('The main profile cannot be deleted.');
+    const rec = store.profiles.get().items.find((x) => x.id === pid);
+    if (!rec) throw new Error('Profile not found');
+    const open = ['queued', 'awaiting-you', 'failed', 'saved', 'in-progress'];
+    store.applications.update((d) => {
+      for (const a of d.items) {
+        if (manager.appProfileId(a) === pid && open.includes(a.status) && !(a.profile && a.profile.values)) {
+          a.profileId = pid;
+          a.profile = { label: rec.label || 'Profile', values: rec.values || {} };
+        }
+      }
+    });
+    const taggedResumes = new Set(store.resumes.get().items.filter((r) => r.profileId === pid).map((r) => r.id));
+    store.campaigns.update((d) => {
+      for (const c of d.items) {
+        if (c.profileId !== pid) continue;
+        c.profileId = null;
+        if (c.resumeId && taggedResumes.has(c.resumeId)) c.resumeId = 'auto';
+        c.updatedAt = new Date().toISOString();
+      }
+    });
+    store.profiles.update((d) => { d.items = d.items.filter((x) => x.id !== pid); });
+    store.cloud.update((c) => { if (c.versions) delete c.versions[`profiles/${pid}`]; });
+    if (cloud) cloud.queueDelete('profiles', pid);
+    store.campaigns.get().items.forEach((c) => emit('campaign:update', c));
+    return { profiles: profilesOut(), campaigns: store.campaigns.get().items, applications: store.applications.get().items };
+  });
+
   // resumes
   const resumeOut = (r) => { const { text, ...rest } = r; return { ...rest, skills: (rest.skills || []).map(displaySkill), textLength: (text || '').length }; };
   // Imports each file independently: one bad/duplicate file never blocks the others.
@@ -279,7 +363,13 @@ function registerIpc() {
     store.resumes.update((d) => {
       if (patch.isDefault) d.items.forEach((x) => { x.isDefault = false; });
       const r = d.items.find((x) => x.id === id);
-      if (r) Object.assign(r, (({ name, roles, isDefault, notes }) => ({ name, roles, isDefault, notes }))({ ...r, ...patch }));
+      if (!r) return;
+      // Which profile this resume is for: an id ('main' or an extra profile) or null = usable by every profile.
+      const hasScope = Object.prototype.hasOwnProperty.call(patch, 'profileId');
+      const pid = hasScope && patch.profileId ? String(patch.profileId) : null;
+      if (pid && !store.hasProfile(pid)) throw new Error('That profile no longer exists.');
+      Object.assign(r, (({ name, roles, isDefault, notes }) => ({ name, roles, isDefault, notes }))({ ...r, ...patch }));
+      if (hasScope) r.profileId = pid;
     });
     return store.resumes.get().items.map(resumeOut);
   });
@@ -338,15 +428,25 @@ function registerIpc() {
     if (existing) return existing;
     return manager.createApplication({ job, match: job.match, resume: resumeLib.pickResume(store, { job }), campaign: null, status: 'saved' });
   });
+  // opts: { resumeId?, mode?, profileId? }. profileId defaults to the profile of this job's existing application
+  // (the most recent one), else the main profile; its values and resumes are used and the application carries it.
   handle('jobs:apply', async (jobId, opts = {}) => {
     const job = store.jobs.get().items[jobId];
     if (!job) throw new Error('Job not found');
-    let app = store.applications.get().items.find((a) => a.jobId === jobId);
-    const resume = resumeLib.pickResume(store, { resumeId: opts.resumeId, job });
+    const apps = store.applications.get().items; // newest first
+    let wanted = opts.profileId || null;
+    if (wanted && !store.hasProfile(wanted)) throw new Error('That profile no longer exists.');
+    if (!wanted) { const prev = apps.find((a) => a.jobId === jobId); wanted = prev ? manager.appProfileId(prev) : 'main'; }
+    const owner = store.resolveProfile(wanted);
+    let app = apps.find((a) => a.jobId === jobId && manager.appProfileId(a) === owner.id);
+    const resume = manager.resumeFor(owner.id, { resumeId: opts.resumeId, job });
     if (!resume) throw new Error('Upload a resume first (Resumes tab).');
-    if (isCurrentEmployer(job, store.profile.get().values || {})) throw new Error(`${job.company} is where you work today, so ApplyPilot won't apply there. Change this in Profile → work history if that's out of date.`);
-    if (!app) app = manager.createApplication({ job, match: job.match, resume, campaign: null, status: 'queued' });
-    else manager.patchApp(app.id, { resumeId: resume.id, resumeName: resume.name });
+    if (isCurrentEmployer(job, owner.values || {})) throw new Error(`${job.company} is where ${owner.id === 'main' ? 'you' : owner.label} work${owner.id === 'main' ? '' : 's'} today, so ApplyPilot won't apply there. Change this in Profile → work history if that's out of date.`);
+    if (!app) {
+      // The stored match was scored for the main profile; score it for the profile that is applying.
+      const match = owner.id === 'main' ? job.match : scoreJob(job, { resumeText: resume.text || '', profile: owner.values || {}, campaign: { roles: [job.title] } });
+      app = manager.createApplication({ job, match, resume, campaign: null, status: 'queued', profileId: owner.id });
+    } else manager.patchApp(app.id, { resumeId: resume.id, resumeName: resume.name });
     manager.applyApplication(app.id, { mode: opts.mode || getSettings().defaultApplyMode });
     return app;
   });
@@ -354,6 +454,8 @@ function registerIpc() {
   // campaigns
   handle('campaigns:save', (c) => {
     let out;
+    // profileId: an extra profile's id; empty or 'main' = the main profile.
+    if (c && Object.prototype.hasOwnProperty.call(c, 'profileId')) c = { ...c, profileId: c.profileId && c.profileId !== 'main' && store.hasProfile(c.profileId) ? String(c.profileId) : null };
     store.campaigns.update((d) => {
       if (c.id) { const cur = d.items.find((x) => x.id === c.id); if (cur) { Object.assign(cur, c, { updatedAt: new Date().toISOString() }); out = cur; } }
       if (!out) {
@@ -401,16 +503,33 @@ function registerIpc() {
   });
 
   // Q&A memory
-  handle('qa:save', (item) => {
+  // qa:save(item): item = { id?, question, answer, options?, source?, profileId? }
+  //   profileId: a profile id ('main' or an extra profile's id) = that profile's own answer; null or '' = shared with
+  //   every profile; leave the key out on an existing answer to keep its scope. Returns the whole answer list.
+  handle('qa:save', (item = {}) => {
+    const { profileId: rawScope, ...rest } = item;
+    const hasScope = Object.prototype.hasOwnProperty.call(item, 'profileId');
+    const scope = rawScope ? String(rawScope) : null;
+    if (scope && !store.hasProfile(scope)) throw new Error('That profile no longer exists.');
     store.qa.update((d) => {
-      const cur = item.id && d.items.find((x) => x.id === item.id);
-      if (cur) Object.assign(cur, item, { source: item.answer ? (cur.source === 'pending' ? 'you' : cur.source) : cur.source, updatedAt: new Date().toISOString() });
-      else d.items.unshift({ id: crypto.randomUUID(), uses: 0, source: 'you', ...item, updatedAt: new Date().toISOString() });
+      const cur = rest.id && d.items.find((x) => x.id === rest.id);
+      if (cur) {
+        Object.assign(cur, rest, { source: rest.answer ? (cur.source === 'pending' ? 'you' : cur.source) : cur.source, updatedAt: new Date().toISOString() });
+        if (hasScope) { if (scope) cur.profileId = scope; else delete cur.profileId; }
+      } else {
+        const rec = { id: crypto.randomUUID(), uses: 0, source: 'you', ...rest, updatedAt: new Date().toISOString() };
+        if (scope) rec.profileId = scope;
+        d.items.unshift(rec);
+      }
     });
     return store.qa.get().items;
   });
   handle('qa:list', () => store.qa.get().items);
-  handle('qa:delete', (id) => { store.qa.update((d) => { d.items = d.items.filter((x) => x.id !== id); }); return store.qa.get().items; });
+  handle('qa:delete', (id) => {
+    store.qa.update((d) => { d.items = d.items.filter((x) => x.id !== id); });
+    if (cloud) cloud.queueDelete('qa', id);
+    return store.qa.get().items;
+  });
 
   // ---- Network: LinkedIn connections for the referral finder (stays on this PC)
   handle('network:import', async () => {
@@ -695,7 +814,16 @@ ${p.linkedin}` : ''}`;
     if (e && e.openUrl) {
       // Application pages are opened with the user's own profile and resume (never a saved browser draft).
       const job = [...Object.values(store.jobs.get().items || {}), ...store.applications.get().items.map((a) => a.job)].find((j) => j && (j.applyUrl || j.url) === url) || { applyUrl: url, url };
-      const r = await e.openUrl(url, { job, profile: store.profile.get().values || {}, resume: resumeLib.pickResume(store, { job }) });
+      // When this page belongs to a tracked application, open it for that application's profile and resume.
+      const tracked = store.applications.get().items.find((x) => x.job && (x.job.applyUrl || x.job.url) === url);
+      let profileValues = store.profile.get().values || {}; let resume = resumeLib.pickResume(store, { job });
+      if (tracked) {
+        const owned = tracked.profile && tracked.profile.values ? { id: manager.appProfileId(tracked), values: tracked.profile.values } : store.resolveProfile(manager.appProfileId(tracked));
+        profileValues = owned.values || {};
+        resume = manager.resumeFor(owned.id, { resumeId: tracked.resumeId, job }) || resume;
+      }
+      const profileKey = tracked ? manager.appProfileId(tracked) : 'main';
+      const r = await e.openUrl(url, { job, profile: profileValues, resume, profileKey });
       if (r && r.warnings && r.warnings.length) notify('Check your application details', r.warnings[0]);
       return true;
     }

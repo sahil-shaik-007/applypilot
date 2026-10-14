@@ -5,6 +5,8 @@ import { AppProvider, useApp, useRoute, go } from './lib/store.jsx';
 import { Toasts, ConfirmSheet, Button } from './components/ui.jsx';
 import { Brand, Mark } from './components/Brand.jsx';
 import { ApplyHost, CampaignScheduler } from './components/apply.jsx';
+import { openQuestions } from './lib/applyFlow.js';
+import { profileIdOfApplication } from './lib/profiles.js';
 import Landing from './pages/Landing.jsx';
 import { CreateVault, Unlock, AskName } from './pages/Vault.jsx';
 import Home from './pages/Home.jsx';
@@ -50,6 +52,7 @@ function Shell() {
   const def = PAGES[page] || PAGES.home;
   const active = def.parent || (PAGES[page] ? page : 'home');
   const needsYou = app.applications.filter((a) => a.status === 'awaiting-you' || a.status === 'queued').length;
+  const waiting = app.applications.filter((a) => a.status === 'awaiting-you' && openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).some((i) => !i.answerRec)).length;
   useEffect(() => { document.title = `${def.title} · ApplyPilot`; }, [def.title]);
   const Page = def.C;
   return (
@@ -76,7 +79,7 @@ function Shell() {
             {active === t.id && <motion.span layoutId="tab-bg" className="tab-bg" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />}
             <t.icon size={20} />
             <span>{t.label}</span>
-            {t.id === 'queue' && needsYou > 0 && <span className="count" data-testid="queue-count">{needsYou > 99 ? '99+' : needsYou}</span>}
+            {t.id === 'queue' && needsYou > 0 && <span className="count" data-testid="queue-count" title={waiting ? `${waiting} waiting for your answers` : undefined}>{needsYou > 99 ? '99+' : needsYou}</span>}
           </button>
         ))}
       </nav>

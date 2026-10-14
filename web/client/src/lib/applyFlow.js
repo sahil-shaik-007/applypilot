@@ -6,15 +6,15 @@
 // The native layer enforces the submit allow-list (it never submits on LinkedIn, Indeed, Naukri,
 // Glassdoor, Workday or unknown sites) and never touches passwords or CAPTCHAs.
 import { useSyncExternalStore } from 'react';
-import { newId } from '@shared/vaultCrypto.js';
 import { scamSignals, eligibility } from '@shared/eligibility.js';
-import { attemptsToday, bestAnswer, worthAsking, resultStatus, fillTemplate, DEFAULT_COVER_TEMPLATE, similarity } from '@shared/campaignRules.js';
+import { attemptsToday, resultStatus, fillTemplate, DEFAULT_COVER_TEMPLATE } from '@shared/campaignRules.js';
 import { getApplication, patchApplication, ensureApplication, AUTO_ATS } from './apply.js';
 import { getProfile, pickResumeFor, snapshotOf, profileIdOf, DEFAULT_PROFILE_ID } from './profiles.js';
 import { coverLetter as aiCoverLetter, answerQuestion as aiAnswer, aiError, DEFAULT_MODEL } from './ai.js';
 import { generateTailored } from './tailored.js';
 import { nat, canApplyInApp, notify, haptic } from './bridge.js';
 import { patchCampaign } from './campaigns.js';
+import { bestAnswerFor, rememberQuestionsFor, saveAnswerFor, saveAiAnswer, answersForFiller } from './answers.js';
 
 const MIME = { '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.txt': 'text/plain', '.md': 'text/markdown' };
 
@@ -98,19 +98,9 @@ async function buildCoverLetter(app, cur, job, style, apiKey, resumeText, profil
   return fillTemplate(profile.coverLetterTemplate || DEFAULT_COVER_TEMPLATE, job, profile);
 }
 
-/** Remembers unanswered form questions in the Answer bank (once each). */
-export async function rememberQuestions(app, unanswered = []) {
-  let added = 0;
-  const known = app.sync.list('qa');
-  for (const u of unanswered) {
-    const q = typeof u === 'string' ? { question: u } : u;
-    if (!worthAsking(known, q.question, q.required)) continue;
-    const rec = { id: newId(), question: String(q.question).trim().slice(0, 500), answer: '', options: (q.options || []).slice(0, 30), source: 'pending', uses: 0, updatedAt: new Date().toISOString() };
-    await app.put('qa', rec.id, rec);
-    known.push(rec);
-    added++;
-  }
-  return added;
+/** Remembers unanswered form questions in the Answer bank (once each), tagged with the profile that asked. */
+export async function rememberQuestions(app, unanswered = [], profileId) {
+  return rememberQuestionsFor(app, unanswered, profileId);
 }
 
 // ---------------------------------------------------------------- open questions of one application
@@ -119,9 +109,10 @@ const normQ = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 /**
  * The open questions of one application. This is the ONE list the count and the rows both use, so the
  * number shown always equals the rows listed. `answerRec` is the answer-bank entry that answers the
- * question (same 0.72 similarity rule the desktop uses when it fills a form), or null when unanswered.
+ * question (same 0.72 similarity rule the desktop uses when it fills a form) for `profileId`: that profile's own
+ * answers first, then shared ones, never another profile's. Null when unanswered.
  */
-export function openQuestions(qa = [], unanswered = []) {
+export function openQuestions(qa = [], unanswered = [], profileId) {
   const seen = new Set();
   const out = [];
   for (const u of unanswered || []) {
@@ -130,29 +121,26 @@ export function openQuestions(qa = [], unanswered = []) {
     const key = normQ(question);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    out.push({ key, question, required: !!q.required, options: Array.isArray(q.options) ? q.options : [], answerRec: bestAnswer(qa, question) });
+    out.push({ key, question, required: !!q.required, options: Array.isArray(q.options) ? q.options : [], answerRec: bestAnswerFor(qa, question, profileId) });
   }
   return out;
 }
 
-/** Saves an answer to the answer bank: updates the entry that matches the question, or adds one. */
-export async function saveBankAnswer(app, item, answer) {
-  const text = String(answer || '').trim();
-  if (!text) throw new Error('Type an answer first.');
-  const match = item.answerRec || app.qa.find((q) => !q.answer && similarity(q.question, item.question) >= 0.85) || null;
-  const id = match ? match.id : newId();
-  const rec = {
-    ...(match || {}),
-    id,
-    question: match ? match.question : item.question,
-    answer: text,
-    options: match ? (match.options || []) : item.options.slice(0, 30),
-    source: 'user',
-    uses: (match && match.uses) || 0,
-    updatedAt: new Date().toISOString(),
-  };
-  await app.put('qa', id, rec);
-  return rec;
+/**
+ * Saves an answer to the answer bank for the profile the application is for (`opts.profileId`), or for every
+ * profile with `opts.shared`. Updates the entry that matches the question, or adds one.
+ */
+export async function saveBankAnswer(app, item, answer, opts = {}) {
+  return saveAnswerFor(app, item, answer, opts);
+}
+
+/**
+ * Fingerprint of what the PC would be asked to do for an application: status, profile, resume and which of its
+ * questions are answered. A "sent to your PC" flag is only honoured while this is unchanged.
+ */
+export function pendingSig(qa, a, profileId) {
+  const items = openQuestions(qa, a.unanswered, profileId);
+  return [a.status, profileId || '', a.resumeId || '', items.map((i) => `${i.key}=${i.answerRec ? i.answerRec.id : ''}`).join('|')].join('::');
 }
 
 /** Clears one question from an application's open list. The question stays in the answer bank. */
@@ -215,7 +203,7 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
     if (resume.resumeId) Object.assign(patch, { resumeId: resume.resumeId, resumeName: resume.resumeName });
     await patchApplication(app, a.id, patch);
     step(`Opening the application with ${resume.tailored ? 'your tailored resume' : `"${resume.name}"`}`);
-    const answers = app.sync.list('qa').filter((q) => q.answer).map((q) => ({ id: q.id, question: q.question, answer: q.answer }));
+    const answers = answersForFiller(app.sync.list('qa'), pid);
     const result = await nat().applyInApp({
       job,
       profile,
@@ -231,10 +219,15 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
       signal: abort.signal,
       beforeSubmit: () => cancelWindow(app, a.id, job),
       answerQuestion: async (question, info = {}) => {
-        const hit = bestAnswer(app.sync.list('qa'), question);
+        const hit = bestAnswerFor(app.sync.list('qa'), question, pid);
         if (hit) return hit.answer;
         if (settings.aiAnswerQuestions && apiKey) {
-          try { return await aiAnswer({ apiKey, model: settings.aiModel || DEFAULT_MODEL, question, options: info.options, type: info.type, job, profile, resumeText: base ? base.text : '' }); } catch { return null; }
+          try {
+            const ans = await aiAnswer({ apiKey, model: settings.aiModel || DEFAULT_MODEL, question, options: info.options, type: info.type, job, profile, resumeText: base ? base.text : '' });
+            // Remembered for the profile that asked (same rule as the desktop: not for choice questions).
+            if (ans && !(info.options && info.options.length)) await saveAiAnswer(app, question, ans, pid).catch(() => {});
+            return ans;
+          } catch { return null; }
         }
         return null;
       },
@@ -246,7 +239,7 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
     }) || {};
     const status = resultStatus(result);
     const unanswered = result.unanswered || [];
-    const added = await rememberQuestions(app, unanswered);
+    const added = await rememberQuestions(app, unanswered, pid);
     const msg = result.message || ({ applied: 'Application submitted', 'awaiting-you': result.status === 'held' ? 'Held — finish it yourself' : 'Filled in — review and submit', failed: 'Could not complete the application' }[status]);
     await patchApplication(app, a.id, { status, unanswered, pendingSubmitUntil: null, ...(result.url ? { finalUrl: result.url } : {}), ...(status === 'applied' ? { appliedAt: new Date().toISOString(), followUpAt: new Date(Date.now() + 7 * 86400000).toISOString() } : {}) }, { type: result.status || status, message: `${msg}${result.filledCount != null ? ` (${result.filledCount} fields filled)` : ''}${added ? ` · ${added} new question(s) in your Answer bank` : ''}` });
     if (campaign && (status === 'applied' || status === 'failed')) await patchCampaign(app, campaign.id, (c) => ({ stats: { ...(c.stats || {}), [status]: ((c.stats || {})[status] || 0) + 1 } })).catch(() => {});

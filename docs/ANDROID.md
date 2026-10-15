@@ -95,6 +95,7 @@ On Android 12+, the system splash uses `windowSplashScreenBackground=#0a0a0a`, w
 | Backups | `data_extraction_rules.xml`, `allowBackup=false` | No cloud backup and no device-to-device transfer. Session tokens must not migrate. Vault data re-syncs (E2E encrypted) after sign-in. |
 | R8 | `app/proguard-rules.pro` | Release: `minifyEnabled` + `shrinkResources`. Keeps Capacitor and plugin classes, `@JavascriptInterface` members, background-runner JNI, WorkManager workers, biometric, Credential Manager and inappbrowser classes. |
 | background-runner | `app/build.gradle` | Adds `node_modules/@capacitor/background-runner/android/src/main/libs` to `flatDir` (needed for its JS-engine `.aar`). |
+| Runner file | `vite.config.js` | The build copies `runners/background.js` to `dist/runners/` (the plugin loads `public/runners/background.js`), so run a web build before `cap sync`; `build-local.ps1` does. Check: `android/app/src/main/assets/public/runners/background.js` exists. |
 | Signing | `app/build.gradle` | Release signing reads env vars or Gradle properties only (see §4). With no keystore, the release output is **unsigned** and Gradle prints a warning. |
 
 ### Share contract (for `src/native` `share.onIncoming`)
@@ -240,3 +241,4 @@ Then run `.\build-local.ps1 -Task bundleRelease` and verify the signature with `
 - *Out-of-memory or very slow builds:* close other apps. Keep `--no-daemon`. Use `.\gradlew.bat --stop` to kill stray daemons.
 - *`Package build-tools not found` from sdkmanager:* use `/` instead of `;` in package paths (cmdline-tools 23+ on cmd.exe).
 - *Google Sign-In `[28444] Developer console is not set up correctly`:* the SHA-1 or package isn't registered for the certificate that signed the installed build (see §6.4).
+- *CI "Process completed with exit code 126" at `./gradlew`:* `gradlew` was committed from Windows without the executable bit. The workflow runs `chmod +x gradlew` first; to fix it at the source run `git update-index --chmod=+x web/client/android/gradlew`.

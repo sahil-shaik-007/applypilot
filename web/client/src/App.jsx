@@ -6,6 +6,8 @@ import { Toasts, ConfirmSheet, Button } from './components/ui.jsx';
 import { Brand, Mark } from './components/Brand.jsx';
 import { ApplyHost, CampaignScheduler } from './components/apply.jsx';
 import { openQuestions } from './lib/applyFlow.js';
+import { saveJob } from './lib/apply.js';
+import { nat } from './lib/bridge.js';
 import { profileIdOfApplication } from './lib/profiles.js';
 import Landing from './pages/Landing.jsx';
 import { CreateVault, Unlock, AskName } from './pages/Vault.jsx';
@@ -46,6 +48,36 @@ const PAGES = {
   platforms: { C: Platforms, title: 'Job platforms', parent: 'more' },
 };
 
+/**
+ * "Share to ApplyPilot": a job link shared from LinkedIn, Naukri or a browser becomes a saved job in Applications.
+ * Queued shares from a cold start are delivered once the vault is unlocked (this component only mounts then).
+ * Nothing is sent or applied; the user opens it and chooses what to do.
+ */
+function ShareReceiver() {
+  const app = useApp();
+  const ref = React.useRef(app);
+  ref.current = app;
+  useEffect(() => {
+    let last = '';
+    return nat().share.onIncoming(async (item) => {
+      const url = item && item.url;
+      if (!url || url === last) return;
+      last = url;
+      const a = ref.current;
+      try {
+        let host = '';
+        try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { host = ''; }
+        const firstLine = String((item.text || '').replace(url, '')).split(/\r?\n/).map((x) => x.trim()).find(Boolean) || '';
+        const job = { id: `shared:${url}`, title: (firstLine || `Job from ${host || 'a shared link'}`).slice(0, 140), company: host || 'Shared link', url, applyUrl: url, source: 'shared', location: '', description: '' };
+        await saveJob(a, job);
+        a.toast('Saved to Applications from your share', 'success');
+        go('applied');
+      } catch (e) { a.toast(e.message || 'Could not save the shared link', 'error'); }
+    });
+  }, []);
+  return null;
+}
+
 function Shell() {
   const app = useApp();
   const { page, params } = useRoute();
@@ -59,6 +91,7 @@ function Shell() {
     <div className="shell has-rail">
       <div className="rail-brand"><Brand /></div>
       <CampaignScheduler />
+      <ShareReceiver />
       <ApplyHost />
       <header className="topbar">
         {def.parent ? <Button variant="ghost" icon={ChevronLeft} aria-label="Back" onClick={() => go(def.parent)} /> : <span style={{ display: 'grid', width: 44, placeItems: 'center' }}><Mark size={24} /></span>}

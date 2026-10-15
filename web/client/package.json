@@ -1,7 +1,7 @@
 {
   "name": "@applypilot/web-client",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.8.0",
   "type": "module",
   "description": "ApplyPilot mobile-first PWA (zero-knowledge encrypted client).",
   "scripts": {

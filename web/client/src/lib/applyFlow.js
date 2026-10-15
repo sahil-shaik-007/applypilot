@@ -9,7 +9,8 @@ import { useSyncExternalStore } from 'react';
 import { scamSignals, eligibility } from '@shared/eligibility.js';
 import { attemptsToday, resultStatus, fillTemplate, DEFAULT_COVER_TEMPLATE } from '@shared/campaignRules.js';
 import { getApplication, patchApplication, ensureApplication, AUTO_ATS } from './apply.js';
-import { getProfile, pickResumeFor, snapshotOf, profileIdOf, DEFAULT_PROFILE_ID } from './profiles.js';
+import { getProfile, allProfiles, pickResumeFor, snapshotOf, profileIdOf, DEFAULT_PROFILE_ID } from './profiles.js';
+import { missingIdentity } from './applyReadiness.js';
 import { coverLetter as aiCoverLetter, answerQuestion as aiAnswer, aiError, DEFAULT_MODEL } from './ai.js';
 import { generateTailored } from './tailored.js';
 import { nat, canApplyInApp, notify, haptic } from './bridge.js';
@@ -173,8 +174,19 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
   // The person this application is for: its own profile, else its campaign's, else the default profile.
   const campaign = a.campaignId ? app.sync.get('campaigns', a.campaignId) : null;
   const pid = a.profileId || (campaign && campaign.profileId) || DEFAULT_PROFILE_ID;
-  const who = getProfile(app, pid);
-  const profile = who.values;
+  // Never fill a form with somebody else's details: an application whose profile was deleted uses the snapshot
+  // stored on the application; with no snapshot it is not applied (getProfile alone would fall back to "Me").
+  const known = allProfiles(app).find((p) => p.id === pid);
+  const who = known || (a.profile && a.profile.values ? { id: pid, label: a.profile.label || 'Removed profile', values: a.profile.values } : null);
+  if (!who) throw new Error('The profile this application was made for no longer exists. Open it in the tracker and pick a profile.');
+  const profile = who.values || {};
+  // Same "check before applying" rule as sending to the PC: with identity gaps nothing is opened or attempted.
+  const gaps = missingIdentity(profile);
+  if (gaps.length) {
+    const e = new Error(`Add ${gaps.map((g) => g.label.toLowerCase()).join(', ')} to ${who.label === 'Me' ? 'your' : `${who.label}'s`} profile (More → Profile) before applying.`);
+    e.code = 'incomplete';
+    throw e;
+  }
   const pf = preflight(app, job, profile);
   if (pf.scam) {
     await patchApplication(app, a.id, { status: 'skipped' }, { type: 'blocked', message: `Blocked before sending any data — looks like a scam (${pf.reasons.join(', ')}).` });

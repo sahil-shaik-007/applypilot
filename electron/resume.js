@@ -205,11 +205,27 @@ async function reparseResume(store, id) {
   return store.resumes.get().items.find((x) => x.id === id);
 }
 
+// A resume record keeps the absolute path of its file. After data is moved or restored from a backup that path can
+// point somewhere that no longer exists; the file itself is in this install's own resumes folder under the same name.
+function repairResumePaths(store) {
+  let fixed = 0;
+  store.resumes.update((d) => {
+    for (const r of d.items) {
+      if (!r.path) continue;
+      const here = path.join(store.resumesDir, path.basename(String(r.path).replace(/\\/g, '/')));
+      // Always prefer this install's own copy of the file over a path somewhere else.
+      if (path.resolve(r.path) !== path.resolve(here) && fs.existsSync(here)) { r.path = here; fixed++; }
+    }
+  });
+  return fixed;
+}
+
 // One-time upgrade of resumes parsed by an older extractor.
 async function migrateResumes(store) {
+  repairResumePaths(store);
   for (const r of store.resumes.get().items) {
     if ((r.parserVersion || 1) < PARSER_VERSION) { try { await reparseResume(store, r.id); } catch { /* keep old text */ } }
   }
 }
 
-module.exports = { importResume, deleteResume, pickResume, extractText, guessProfile, reparseResume, migrateResumes, PARSER_VERSION };
+module.exports = { importResume, deleteResume, pickResume, extractText, guessProfile, reparseResume, migrateResumes, repairResumePaths, PARSER_VERSION };

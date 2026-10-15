@@ -89,6 +89,15 @@
     return files.map((f) => ({ key: f.key, kind: classifyFile(f, files.length), question: f.question, required: !!f.required, hasFile: !!f.hasFile }));
   }
 
+  // Page-owned helper inputs that a person cannot see or reach (aria-hidden + tabindex -1). Workable keeps city /
+  // country / postcode ones next to the Address box to catch browser autofill; typing into them appends to the Address.
+  function isDecoy(f) {
+    if (f.kind === 'file' || f.kind === 'radio' || f.kind === 'checkboxGroup' || f.kind === 'buttons') return false;
+    const el = byKey(f.key);
+    return !!el && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0;
+  }
+  const scanForm = () => globalThis.__apScan({ exclude: EXCLUDE }).filter((f) => !isDecoy(f));
+
   function fieldType(f) {
     switch (f.kind) {
       case 'textarea': return 'textarea';
@@ -242,10 +251,22 @@
         if (f.value === ans) return true;
         const el = deepAll(`[data-ap-id="${CSS.escape(f.key)}"][data-ap-opt="${i}"]`)[0];
         if (!el || SUBMIT_TEXT.test(el.innerText || '')) return false;
+        // aria-pressed buttons and role=radio options (aria-checked) both report their state back
+        const known = el.hasAttribute('aria-pressed') || el.hasAttribute('aria-checked');
+        const isOn = () => el.getAttribute('aria-pressed') === 'true' || el.getAttribute('aria-checked') === 'true';
         el.click();
-        await sleep(50);
+        await sleep(80);
+        if (known && !isOn()) {
+          // Some pages (Workable) only react to the option's own <label>/<input>, or to the Space key on the option.
+          const inner = el.querySelector('label,input');
+          if (inner) { inner.click(); await sleep(80); }
+          if (!isOn()) {
+            for (const t of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(t, { key: ' ', code: 'Space', keyCode: 32, bubbles: true }));
+            await sleep(80);
+          }
+        }
         mark(el, 'filled');
-        return el.getAttribute('aria-pressed') !== 'false';
+        return known ? isOn() : true;
       }
       case 'checkbox': {
         const el = byKey(f.key); if (!el) return false;
@@ -303,7 +324,7 @@
     await withSubmitGuard(async () => {
       const processed = new Set();
       for (let pass = 0; pass < 3; pass++) {
-        const fields = globalThis.__apScan({ exclude: EXCLUDE });
+        const fields = scanForm();
         state.fields = fields;
         out.fileFields = fileFieldsOf(fields);
         const ctx = { profile, job, bank, coverLetterText: data.coverLetterText, manual, hasCodeField: codeFieldPresent(fields) };
@@ -412,7 +433,7 @@
   // so a dropdown's planned value is the closest text and the exact option is matched when the fill runs.
   async function plan(data) {
     if (!A() || !globalThis.__apScan) throw new Error('ApplyPilot helpers are not loaded');
-    const fields = globalThis.__apScan({ exclude: EXCLUDE });
+    const fields = scanForm();
     const ctx = {
       profile: data.profile || {}, job: data.job || {}, bank: data.answers || [], coverLetterText: data.coverLetterText || null,
       manual: null, hasCodeField: codeFieldPresent(fields),

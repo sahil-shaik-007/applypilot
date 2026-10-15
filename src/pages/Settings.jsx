@@ -444,10 +444,44 @@ function Plan() {
   );
 }
 
+// Automatic backups of the data folder, with one-click restore.
+function Backups() {
+  const app = useApp();
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => app.run('backups:list').then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  const restore = async (b) => {
+    if (!(await app.confirm({ title: 'Restore this backup?', message: `ApplyPilot restarts with the data from ${new Date(b.at).toLocaleString()} (${b.applications} applications, ${b.resumes} resumes, ${b.campaigns} campaigns). Your current data is backed up first.`, confirmLabel: 'Restore' }))) return;
+    app.run('backups:restore', [b.name]);
+  };
+  return (
+    <div className="card pad col" style={{ gap: 10, marginBottom: 14 }}>
+      <div className="row between">
+        <div><div className="section-title" style={{ margin: 0 }}>Automatic backups</div><div className="small dim">Kept on this PC: at start-up, every 6 hours, and before a restore. The newest 10 are kept.</div></div>
+        <div className="row" style={{ gap: 8 }}>
+          <Button size="sm" loading={busy} onClick={async () => { setBusy(true); try { const r = await app.run('backups:now'); setList(r.backups); app.toast(r.created ? 'Backup created' : 'Nothing new to back up', 'success'); } finally { setBusy(false); } }}>Back up now</Button>
+          <Button size="sm" onClick={() => app.run('backups:openFolder')}>Open folder</Button>
+        </div>
+      </div>
+      {list && list.length ? list.map((b) => (
+        <div key={b.name} className="row between small" style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+          <div className="col" style={{ gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>{new Date(b.at).toLocaleString()}</span>
+            <span className="dim">{b.applications} applications · {b.resumes} resumes · {b.campaigns} campaigns · {b.answers} answers · {b.profileFields} profile fields</span>
+          </div>
+          <Button size="sm" onClick={() => restore(b)}>Restore</Button>
+        </div>
+      )) : <div className="small dim">{list ? 'No backups yet. One is made automatically once you have data.' : ''}</div>}
+    </div>
+  );
+}
+
 function Data() {
   const app = useApp();
   return (
     <div>
+      <Backups />
       <div className="card pad" style={{ marginBottom: 14 }}>
         <div className="row"><Globe size={16} color="var(--green)" /><b>100% local.</b></div>
         <div className="small muted" style={{ marginTop: 4 }}>Your profile, resumes, applications and API keys are stored only on this PC (keys encrypted with Windows DPAPI). ApplyPilot has no servers that receive your data. Job searches go directly from your PC to each job source.</div>

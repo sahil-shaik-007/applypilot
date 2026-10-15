@@ -73,14 +73,34 @@ export async function saveFile({ name, bytes, mime }): Promise<void>;       // s
 - A cancel window runs before every auto-submit.
 - Keys: the DEK lives in memory. "Biometric unlock" stores it only in the platform keystore (Android Keystore / iOS Keychain) behind biometric auth. Never in Preferences or localStorage.
 
+## Status of the contract (audited 2026-10-15, Android debug build; not yet run on a device)
+
+| Item | State | Where | Notes |
+|---|---|---|---|
+| `applyInApp` | Implemented | `src/native/inapp.js`, `src/lib/applyFlow.js`, `src/native/autofill.bundle.js` | Uses the application's profile (own profile, else its campaign's, else default; a deleted profile falls back to the snapshot on the application, never to "Me"), that profile's answers and resume. Refuses to start when first name, last name, email, phone, city or country is missing. Review mode never submits. Autopilot submits only on allow-listed ATSs, after an in-page cancel window with a Cancel button, and only when every required field is answered. Nothing was exercised on a real device yet. |
+| Notifications | Implemented (local) | `src/native/index.js` `notifications` | Local notifications and tap routing. Remote push (`@capacitor/push-notifications`) is installed but not used: it needs Firebase / APNs. |
+| Background runner | Partial | `runners/background.js`, `vite.config.js` | Searches campaign queries and notifies; scoring happens when the app opens. The runner file was missing from the bundle before; the build now copies it to `dist/runners/`. Background results are not surfaced in the UI beyond the notification tap (`consumePending` has no caller). OS scheduling untested. |
+| Biometric unlock | Partial | `src/native/secure.js` | Keystore/Keychain storage is implemented; there is no Settings toggle and no "Unlock with fingerprint/Face ID" button yet. The DEK must be exported from the passphrase unlock (`extractable: true`) to enable it. |
+| Share in | Android: Implemented. iOS: Missing (URL scheme and Shortcut only) | `MainActivity.java`, `src/native/incoming.js`, `ShareReceiver` in `src/App.jsx` | A shared link is saved as a job in Applications and nothing is sent or applied. iOS needs a Share Extension target (Apple account required, see `docs/IOS.md`). |
+| File save | Implemented | `saveFile` in `src/native/index.js` | Cache file plus the system share sheet; browser download on the web. |
+
 ## Build and run
 
 - Web build: `cd web/client && npm run build`, then `npx cap sync`.
-- Android: `npx cap open android`, or `cd android && gradlew assembleDebug`. CI: `.github/workflows/android.yml`.
+- Android: `cd web/client/android && .\build-local.ps1` (Windows, see `docs/ANDROID.md`), or `npx cap open android`. CI: `.github/workflows/android.yml`.
 - iOS: on a Mac, `npx cap open ios`. CI: `.github/workflows/ios.yml` (macOS runner; simulator build; signed IPA once Apple secrets are added).
-- Store publishing needs:
-  - Android: a Google Play developer account ($25 one-time) and a release keystore
-  - iOS: an Apple Developer Program membership ($99/yr)
-  - Google Sign-In: OAuth client IDs for each platform (Android needs the signing certificate's SHA-1)
 
-  See `docs/PUBLISHING.md`.
+## Still needed from you for a store release
+
+Nothing below can be done from this repo; none of it exists yet.
+
+- [ ] **Google Play developer account** ($25 one-time). New personal accounts need a closed test (12 testers, 14 days) before production.
+- [ ] **Android upload keystore**, then the four GitHub secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (`docs/ANDROID.md` section 4). Keep a backup of the keystore.
+- [ ] **Apple Developer Program** ($99/yr), an App ID `com.applypilot.app`, then the secrets `APPLE_TEAM_ID`, `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `BUILD_PROVISION_PROFILE_BASE64` and the App Store Connect API key secrets (`docs/IOS.md`). A Mac is only needed for the Share Extension and for debugging.
+- [ ] **Google sign-in client IDs**: a Web client, an Android client per signing certificate SHA-1 (debug, upload, Play App Signing) and an iOS client (its reversed ID goes in the `GOOGLE_IOS_REVERSED_CLIENT_ID` build setting).
+- [ ] **A public host for the cloud server** (`https://app.applypilot.app` is the default base URL), with `/.well-known/assetlinks.json` (Android App Links) and `apple-app-site-association` (iOS universal links) served from it.
+- [ ] **Privacy policy URL**: `docs/PRIVACY.md` still describes only the desktop app ("we collect nothing"). Update it for the mobile app and ApplyPilot Cloud, then host it. Both stores require the URL.
+- [ ] **Account deletion web URL** (Play requires one; the in-app delete already works).
+- [ ] **Store listing**: icon, feature graphic, screenshots (`docs/screenshots/`), descriptions, support email, content-rating and data-safety / App Privacy answers (drafts are in `docs/ANDROID.md` section 6 and `docs/IOS.md`).
+- [ ] **A test account** for the store reviewers.
+- [ ] **Firebase `google-services.json` and an APNs key**, only if remote push is wanted.

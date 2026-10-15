@@ -609,6 +609,17 @@ function registerIpc() {
   handle('extension:newCode', () => { if (bridge) bridge.resetPairing(); return extStatus(); });
   handle('extension:revoke', (id) => { if (bridge) bridge.revokePairing(String(id)); return extStatus(); });
   handle('extension:openFolder', async () => { await shell.openPath(extensionDir()); return true; });
+  // ---- Automatic backups of your data (also made at startup and every 6 hours)
+  handle('backups:list', () => store.listBackups());
+  handle('backups:now', () => { const n = store.backupNow('manual'); return { created: n, backups: store.listBackups() }; });
+  handle('backups:openFolder', async () => { fs.mkdirSync(store.backupDir, { recursive: true }); await shell.openPath(store.backupDir); return true; });
+  handle('backups:restore', async (name) => {
+    manager.stopAll();
+    store.restoreBackup(String(name || ''));
+    quitting = true;
+    app.relaunch();
+    app.exit(0); // exits without flushing, so the restored files stay as they are
+  });
   handle('cloud:status', () => cloud.status());
   handle('cloud:link', (o) => cloud.link(o));
   handle('cloud:unlink', () => cloud.unlink());
@@ -706,7 +717,7 @@ function registerIpc() {
     engine = null;
     store.flushAll();
     const dir = app.getPath('userData');
-    for (const name of ['data', 'resumes', 'screenshots', 'browser-profile']) {
+    for (const name of ['data', 'resumes', 'screenshots', 'browser-profile', 'backups']) {
       try { fs.rmSync(path.join(dir, name), { recursive: true, force: true }); } catch {}
     }
     quitting = true;
@@ -913,6 +924,9 @@ app.whenReady().then(() => {
   if (process.argv.includes('--hidden')) win.once('ready-to-show', () => win.hide());
   resumeLib.migrateResumes(store).then(() => emit('resumes:changed', store.resumes.get().items.map((r) => r.id))).catch(() => {});
   setTimeout(() => manager.resumeAll(), 4000);
+  // Rolling backups of the data folder (an empty profile is never backed up over a good one).
+  setTimeout(() => store.backupNow('startup'), 3000);
+  setInterval(() => store.backupNow('auto'), 6 * 60 * 60 * 1000);
   setInterval(followUpTick, 60 * 60 * 1000);
   setInterval(digestTick, 15 * 60 * 1000);
   setTimeout(digestTick, 60000);

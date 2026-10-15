@@ -2,6 +2,41 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.0] — 2026-10-15
+
+### Added
+- **Automatic backups** (Windows app). Your data files and resume files are copied to `backups` at start-up, every
+  6 hours and on demand; the newest 10 are kept and the richest one is always kept. An empty profile is never
+  backed up over a good one. Settings → Data & privacy lists them with **Restore**, **Back up now** and
+  **Open folder**. "Delete all my data" removes them too.
+- **Overwrite guard.** Before a much smaller data file replaces a real one, a copy is kept next to it
+  (`*.bak-<time>`).
+- **Resume paths repair themselves.** If a resume record points to a file somewhere else, the app uses its own copy
+  in its resumes folder, so moved or restored data keeps working.
+
+### Fixed (browser extension, found by running it live on a Workable form)
+- Address was corrupted ("Hyderabad, India, Pune, India"): Workable's hidden helper fields (city, country,
+  postcode) were being filled. Hidden decoy fields are now skipped.
+- YES/NO groups built from `role="radio"` elements were never selected, yet reported as done. They are now
+  selected and the result is read back from the page.
+- Verified on the live form with a throwaway identity: names, email, national phone number with the +91 picker,
+  address, both YES/NO questions and the resume. Nothing was submitted.
+
+### Phone apps
+- The background job check was never included in the app bundle; it is now.
+- A job link shared into the Android app is saved as a job in Applications.
+- Applying in the app asks for missing name/email/phone/location before opening a page, and a deleted profile no
+  longer falls back to another person's details.
+- Android build script is executable in git (Android CI was failing with exit code 126).
+- App version is now 1.8.0 on Android and iOS; docs/MOBILE.md has a release checklist.
+
+### Privacy
+- docs/PRIVACY.md now covers the phone and web portal, what the server can see, and backups.
+
+### Tests
+- Desktop e2e (new: automatic backups). Feature units, apply self-test and the phone-to-desktop sync check are
+  unchanged and pass.
+
 ## [1.7.0] — 2026-10-15
 
 ### Added

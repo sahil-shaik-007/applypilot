@@ -914,6 +914,14 @@ async function deleteAllData() {
   await nav('Settings');
   await page.locator('.side-list button', { hasText: 'Data & privacy' }).click(); await page.waitForTimeout(500);
   await shot('17-settings-data');
+  await check('automatic backups: the card lists them, "Back up now" works and a backup holds real data', async () => {
+    assert(await page.getByText('Automatic backups').isVisible(), 'backups card missing');
+    await page.getByRole('button', { name: 'Back up now' }).click(); await page.waitForTimeout(900);
+    const list = await call('backups:list');
+    assert(Array.isArray(list) && list.length >= 1, 'no backup exists');
+    assert(list[0].applications > 0 || list[0].resumes > 0 || list[0].profileFields > 0, 'the backup is empty');
+    assert(await page.getByRole('button', { name: 'Restore' }).first().isVisible(), 'no restore button');
+  });
   await check('"Delete everything" wipes all data and restarts the app', async () => {
     await page.getByRole('button', { name: 'Delete everything' }).click();
     deleteClickedAt = new Date();
@@ -921,7 +929,7 @@ async function deleteAllData() {
     await page.locator('.modal-foot button', { hasText: 'Delete everything' }).click().catch(() => {});
     await Promise.race([closed, sleep(15000)]);
     await sleep(3000);
-    for (const name of ['data', 'resumes', 'browser-profile']) {
+    for (const name of ['data', 'resumes', 'browser-profile', 'backups']) {
       const p = path.join(USER_DATA, name);
       const left = fs.existsSync(p) ? fs.readdirSync(p).filter((f) => !/^(settings|license|platform-usage)\.json$/.test(f)) : [];
       assert(!fs.existsSync(p) || name === 'data' ? true : !left.length, `${name} not wiped: ${left}`);

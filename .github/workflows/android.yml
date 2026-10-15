@@ -81,7 +81,10 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: ${{ env.CLIENT_DIR }}/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        # gradlew is committed from Windows without the executable bit (exit code 126 otherwise).
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -147,7 +147,7 @@ async function handleFiles(frame, fields, ctx, state) {
       if (!ctx.resume || !ctx.resume.path) { state.unanswered.push({ question: f.question || 'Resume', required: !!f.required }); continue; }
       if (f.hasFile) continue;
       try {
-        await dom.uploadFile(frame, `[data-ap-id="${f.key}"]`, ctx.resume.path, ctx);
+        await dom.uploadFile(frame, `[data-ap-id="${f.key}"]`, ctx.resume.path, ctx, ctx.resume.fileName);
         uploaded++; state.filled++;
         ctx.emit('step', `Uploaded resume (${ctx.resume.fileName || 'resume'})`, { field: f.question || 'Resume' });
       } catch (e) {

@@ -18,7 +18,17 @@ async function identityHook(frame, f, ctx) {
   const name = String(f.name || '').toLowerCase();
   const label = IDENTITY[name];
   if (!label) return undefined;
-  const want = answerFromProfile(label, { type: 'text', phoneNational: true }, ctx.profile, ctx.job);
+  let want = answerFromProfile(label, { type: 'text', phoneNational: true }, ctx.profile, ctx.job);
+  if (name === 'address') {
+    // "Include your city, region, and country": no street fragments, and no name repeated (a state saved as the
+    // city must not read "Andhra Pradesh, Andhra Pradesh, India").
+    const parts = [];
+    for (const v of [ctx.profile.city, ctx.profile.state, ctx.profile.country]) {
+      const t = String(v || '').trim();
+      if (t && !parts.some((x) => x.toLowerCase() === t.toLowerCase())) parts.push(t);
+    }
+    if (parts.length) want = parts.join(', ');
+  }
   const page = String(f.value || '').trim();
   if (!want) {
     if (!page) return undefined; // nothing to give and nothing pre-filled: generic handling reports it if required
@@ -66,7 +76,7 @@ async function attachResume(frame, ctx) {
   if (!file) return false;
   for (let i = 0; i < 2; i++) {
     if (!(await frame.locator(RESUME_SEL).count().catch(() => 0))) return false;
-    await dom.uploadFile(frame, RESUME_SEL, file, ctx).catch(() => {});
+    await dom.uploadFile(frame, RESUME_SEL, file, ctx, ctx.resume.fileName).catch(() => {});
     await dom.sleep(3000);
     if (await resumeShown(frame, ctx.resume)) return true;
   }

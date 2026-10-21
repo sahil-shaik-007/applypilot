@@ -2,6 +2,22 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.9.0] — 2026-10-21
+
+Found by applying for real, with a real resume, on real job boards (fill-only; nothing was submitted without a person pressing Submit).
+
+### Fixed
+- **Resume uploaded under an unreadable name.** Stored resumes are named by id on disk, so the form showed `c179fc7e-….pdf`, an employer would have received that name, and the "resume attached?" check failed. The resume is now uploaded under its original file name (`sahul_Resume.pdf`); a cover letter keeps its own name.
+- **Hidden helper fields were filled** (Workable's `city`, `country`, `postcode`) by the desktop engine. They are now skipped.
+- **Workable address**: "city, region, country" without street fragments or a repeated name.
+- **A fresher was shown as having 26 years of experience.** The resume extractor counted the date of birth and school years. Only the work-experience section counts now. That wrong number also made Ashby answer "5 plus" years of experience.
+- **Beginner guard.** Jobs asking for three or more years beyond your experience are no longer queued (turn off per campaign with `skipExperienceGap`). Before, 4-10 year roles ranked as top matches for a fresher.
+- **Education is read from the resume** (degree, branch, college, years); School/Degree/Discipline were blank on forms. Grades are never guessed.
+- **Sites that block automated visitors** (SmartRecruiters showed "Access is temporarily restricted") are now named in the message. ApplyPilot does not try to get around such walls.
+
+### Tests
+- Feature units 23/23 (new: experience, bot wall, education, resume path repair).
+
 ## [1.8.0] — 2026-10-15
 
 ### Added

@@ -72,6 +72,45 @@ async function extractText(filePath) {
   throw new Error('Unsupported resume format. Use PDF, DOCX or TXT.');
 }
 
+// The text of the work-experience / employment / internship section (up to the next section heading), or ''.
+function experienceSection(t) {
+  const start = t.match(/^[ \t]*(?:work\s+|professional\s+)?(?:experience|employment(?:\s+history)?|internships?)\b.*$/im);
+  if (!start) return '';
+  const rest = t.slice(start.index + start[0].length);
+  const next = rest.match(/^[ \t]*(?:education(?:al)?(?:\s+(?:profile|qualifications?|background))?|academic|skills?|technical\s+skills?|projects?|certifications?|achievements?|awards?|personal\s+(?:information|details)|declaration|hobbies|strengths|objective|summary|references|languages)\b.*$/im);
+  return next ? rest.slice(0, next.index) : rest;
+}
+
+// College degrees from the education section: degree + branch + college + years. Conservative on purpose: an entry is
+// only produced when a degree word and a college/university name are both found; grades are never guessed.
+const DEGREES = [
+  [/^(?:b\.?\s?tech|b\.?\s?e\.?|b\.?\s?sc|b\.?\s?com|b\.?\s?a\.?|bca|bachelor[^,;(]{0,30})$/i, "Bachelor's"],
+  [/^(?:m\.?\s?tech|m\.?\s?e\.?|m\.?\s?sc|m\.?\s?com|m\.?\s?a\.?|mca|master[^,;(]{0,30})$/i, "Master's"],
+  [/^mba$/i, 'MBA'],
+  [/^(?:ph\.?\s?d\.?|doctorate)$/i, 'PhD'],
+  [/^(?:diploma|polytechnic)$/i, 'Diploma'],
+];
+const BRANCHES = { ece: 'Electronics and Communication Engineering', eee: 'Electrical and Electronics Engineering', cse: 'Computer Science and Engineering', it: 'Information Technology', mech: 'Mechanical Engineering', me: 'Mechanical Engineering', civil: 'Civil Engineering', ce: 'Civil Engineering', eie: 'Electronics and Instrumentation Engineering' };
+function guessEducation(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ');
+  const out = [];
+  const re = /\b(b\.?\s?tech|b\.?\s?e\b\.?|b\.?\s?sc|b\.?\s?com|bca|bachelor(?: of [a-z ]{3,30})?|m\.?\s?tech|m\.?\s?sc|m\.?\s?com|mca|mba|master(?: of [a-z ]{3,30})?|ph\.?\s?d|diploma)\b\.?\s*(?:\(([^)]{2,40})\))?\s*(?:in\s+([A-Za-z &]{3,40}?)\s+)?([^%]{0,160}?\b(?:college|university|institute|institution|school of|academy)\b[^%]{0,80}?)(?=\s+(?:jntu|[a-z]+ university|board|autonomous|\d{2}\s?%|\d{4})|$)/gi;
+  let m;
+  while ((m = re.exec(flat)) && out.length < 3) {
+    const rawDeg = m[1].trim();
+    const hit = DEGREES.find(([rx]) => rx.test(rawDeg.replace(/\s+/g, ' ').replace(/\.$/, '')));
+    if (!hit) continue;
+    const branchRaw = (m[2] || m[3] || '').trim();
+    const field = BRANCHES[branchRaw.toLowerCase().replace(/[^a-z]/g, '')] || branchRaw;
+    const school = m[4].trim().replace(/[ ,.]+$/, '').replace(/^[^A-Za-z]+/, '');
+    const years = flat.slice(m.index, m.index + m[0].length + 140).match(/\b((?:19|20)\d{2})\s*[-\u2013\u2014]\s*((?:19|20)?\d{2})\b/);
+    const end = years ? (years[2].length === 2 ? years[1].slice(0, 2) + years[2] : years[2]) : '';
+    if (school.length < 6) continue;
+    out.push({ school, degree: hit[1], field, startDate: years ? years[1] : '', endDate: end, gpa: '' });
+  }
+  return out;
+}
+
 function guessProfile(text) {
   const t = text.replace(/\r/g, '');
   const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -103,13 +142,20 @@ function guessProfile(text) {
   const exp = t.match(/(\d{1,2})\+?\s*(?:years|yrs)\s+(?:of\s+)?(?:professional\s+|industry\s+|work\s+)?experience/i);
   if (exp) out.totalYearsExperience = parseInt(exp[1], 10);
   else {
-    const years = [...t.matchAll(/\b(19[89]\d|20[0-3]\d)\b/g)].map((m) => +m[1]);
-    const hasPresent = /present|current|till date|now/i.test(t);
-    if (years.length >= 2) {
-      const span = (hasPresent ? new Date().getFullYear() : Math.max(...years)) - Math.min(...years);
-      if (span > 0 && span < 40) out.totalYearsExperience = span;
+    // Only the work-experience section counts. Birth year, school years and graduation years must never be read as
+    // experience (a fresher's date of birth used to produce "26 years").
+    const work = experienceSection(t);
+    if (work) {
+      const years = [...work.matchAll(/\b(19[89]\d|20[0-3]\d)\b/g)].map((m) => +m[1]);
+      const hasPresent = /present|current|till date|now/i.test(work);
+      if (years.length >= 2 || (years.length === 1 && hasPresent)) {
+        const span = (hasPresent ? new Date().getFullYear() : Math.max(...years)) - Math.min(...years);
+        if (span > 0 && span < 40) out.totalYearsExperience = span;
+      }
     }
   }
+  const edu = guessEducation(t);
+  if (edu.length) out.education = edu;
   out.skills = extractSkills(t).map(displaySkill);
   Object.keys(out).forEach((k) => out[k] === undefined && delete out[k]);
   return out;
@@ -228,4 +274,4 @@ async function migrateResumes(store) {
   }
 }
 
-module.exports = { importResume, deleteResume, pickResume, extractText, guessProfile, reparseResume, migrateResumes, repairResumePaths, PARSER_VERSION };
+module.exports = { guessEducation, importResume, deleteResume, pickResume, extractText, guessProfile, reparseResume, migrateResumes, repairResumePaths, PARSER_VERSION };

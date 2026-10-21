@@ -203,6 +203,9 @@ function __apScan(cfg) {
     const type = (el.getAttribute('type') || (tg === 'INPUT' ? 'text' : tg.toLowerCase())).toLowerCase();
     if (tg === 'INPUT' && type === 'password') continue; // never touch credentials
     if (tg === 'INPUT' && /^(hidden|submit|button|reset|image|search)$/.test(type) && el.getAttribute('role') !== 'combobox') continue;
+    // Decoys: text-like fields that are aria-hidden and not reachable by keyboard are the page's own helpers, not
+    // questions (typing into them corrupted the Address box).
+    if ((tg === 'INPUT' || tg === 'TEXTAREA') && !/^(radio|checkbox|file)$/.test(type) && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     if (type === 'search' && /iti__/.test(el.className)) continue;
     if (excluded(el)) continue;
     if (el.disabled || el.readOnly && el.getAttribute('role') !== 'combobox' && tg !== 'SELECT') { if (type !== 'file') continue; }
@@ -503,9 +506,19 @@ async function typeAndPickSuggestion(frame, selector, text, suggestionSelector, 
   }
 }
 
-async function uploadFile(frame, selector, filePath, ctx) {
+// displayName: the name the employer should see. Stored resumes are named by id on disk (<id>.pdf), so the resume
+// is uploaded from memory under its original file name (for example "sahul_Resume.pdf").
+async function uploadFile(frame, selector, filePath, ctx, displayName) {
   const loc = frame.locator(selector).first();
-  await loc.setInputFiles(filePath, { timeout: 10000 });
+  const nodeFs = require('fs');
+  const nodePath = require('path');
+  if (displayName && displayName !== nodePath.basename(filePath)) {
+    const ext = nodePath.extname(displayName).toLowerCase();
+    const mimeType = { '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.doc': 'application/msword', '.txt': 'text/plain', '.rtf': 'application/rtf', '.md': 'text/markdown' }[ext] || 'application/octet-stream';
+    await loc.setInputFiles({ name: displayName, mimeType, buffer: nodeFs.readFileSync(filePath) }, { timeout: 10000 });
+  } else {
+    await loc.setInputFiles(filePath, { timeout: 10000 });
+  }
   await humanPause(ctx, 300, 800);
   return true;
 }
@@ -513,6 +526,21 @@ async function uploadFile(frame, selector, filePath, ctx) {
 // ---------------------------------------------------------------------------
 // Detection helpers
 // ---------------------------------------------------------------------------
+// A page where the site itself refuses automated visitors ("Access is temporarily restricted", "automated (bot)
+// activity"). Returns the sentence the site shows, or null. ApplyPilot never tries to get around these walls.
+const BOT_WALL = /(access (is )?(temporarily )?(restricted|denied|blocked)[^.\n]{0,60}|we detected unusual activity from your (device|network)[^.\n]{0,40}|automated \(bot\) activity[^.\n]{0,40}|you have been blocked[^.\n]{0,40}|unusual traffic from your computer network)/i;
+async function detectBotBlock(page) {
+  try {
+    for (const f of page.frames()) {
+      const text = await f.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
+      const m = BOT_WALL.exec(String(text).slice(0, 6000));
+      // A real form has many controls; a wall page has almost none.
+      if (m && String(text).length < 2500) return m[0].replace(/\s+/g, ' ').trim().slice(0, 140);
+    }
+  } catch { /* detection must never break an application */ }
+  return null;
+}
+
 // Visible, interactive CAPTCHA challenge (invisible reCAPTCHA / hCaptcha badges are ignored).
 async function detectCaptcha(page) {
   try {
@@ -607,6 +635,6 @@ module.exports = {
   scanFields, assertSafe, safeClick, humanPause,
   fillText, selectNative, setChecked, chooseGroupOption, clickPressButton,
   readComboOptions, peekComboOptions, pickCombo, typeAndPickSuggestion, uploadFile,
-  detectCaptcha, genericConfirmation, visibleErrors, rejectCookies, bestFormFrame, waitForAny,
+  detectBotBlock, detectCaptcha, genericConfirmation, visibleErrors, rejectCookies, bestFormFrame, waitForAny,
   CONFIRM_TEXT,
 };

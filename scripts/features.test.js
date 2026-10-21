@@ -94,6 +94,57 @@ function mockServer(port) {
     assert.ok(!jf.matchesWindow({ firstSeen: new Date(now - 5 * 3600000).toISOString() }, { foundWithinHours: 1, now }));
   });
 
+  console.log('\nExperience gap');
+  const { isExcluded } = require(path.join(ROOT, 'electron', 'match'));
+  await check('a fresher is not queued for roles asking for 5+ years; roles near their level stay', async () => {
+    const senior = { title: 'Embedded Engineer', description: 'We need 5-6 years of experience in embedded C and RTOS.', location: 'Bengaluru, India' };
+    const near = { title: 'Graduate Engineer Trainee', description: 'Entry level. 0-1 years of experience.', location: 'Bengaluru, India' };
+    const fresher = { totalYearsExperience: 0, country: 'India' };
+    assert.ok(/Asks for ~5\+ years/.test(isExcluded(senior, { profile: fresher }) || ''), 'senior role should be excluded');
+    assert.strictEqual(isExcluded(near, { profile: fresher }), null, 'entry role should stay');
+    assert.strictEqual(isExcluded(senior, { profile: { ...fresher, totalYearsExperience: 4 } }), null, 'within 2 years of the ask stays');
+    assert.strictEqual(isExcluded(senior, { profile: fresher, campaign: { skipExperienceGap: false } }), null, 'can be switched off');
+    assert.strictEqual(isExcluded(senior, { profile: { country: 'India' } }), null, 'unknown experience never excludes');
+  });
+
+  console.log('\nResume and apply fixes found in a live run');
+  const resumeLib = require(path.join(ROOT, 'electron', 'resume'));
+  const domLib = require(path.join(ROOT, 'electron', 'apply', 'dom'));
+  await check('a fresher resume gets no inflated experience (date of birth and school years are not work)', async () => {
+    const fresher = 'SHAIK SAHUL\nEmail : a@b.c\n\nEDUCATIONAL PROFILE\nB. Tech (ECE) 2019- 23\nInter 2016 - 19\n\nPERSONAL INFORMATION\nDate of Birth : 2nd November 2000.';
+    assert.strictEqual(resumeLib.guessProfile(fresher).totalYearsExperience, undefined);
+    const worker = 'Jane\n\nWORK EXPERIENCE\nAcme  Jan 2019 - Present\n\nEDUCATION\nB.Tech 2012 - 2016';
+    assert.strictEqual(resumeLib.guessProfile(worker).totalYearsExperience, new Date().getFullYear() - 2019);
+  });
+  await check('education is read from a table-style fresher resume (degree, branch, college, years) and never invented', async () => {
+    const t = 'EDUCATIONAL PROFILE\nCOURSE INSTITUTION BOARD / UNIVERSITY PERCENTAGE YEAR OF PASSING\nB. Tech\n\n(ECE)\n\nST. ANN\u2019S COLLEGE OF\n\nENGINEERING &\n\nTECHNOLOGY,\n\nCHIRALA.\n\nJNTU\n\nKakinada\n60% 2019- 23\n\nInter (MPC)\nSRI MEDHA V JUNIOR COLLEGE, CHIRALA.\n62.7% 2016 - 19';
+    const e = resumeLib.guessEducation(t);
+    assert.strictEqual(e.length, 1, `expected one college degree, got ${JSON.stringify(e)}`);
+    assert.strictEqual(e[0].degree, "Bachelor's");
+    assert.strictEqual(e[0].field, 'Electronics and Communication Engineering');
+    assert.ok(/ANN\u2019S COLLEGE OF ENGINEERING/.test(e[0].school));
+    assert.strictEqual(e[0].endDate, '2023');
+    assert.strictEqual(e[0].gpa, '');
+    assert.deepStrictEqual(resumeLib.guessEducation('SKILLS\nPython\nEXPERIENCE\nAcme 2019-2023'), []);
+  });
+  await check('a site that refuses automated visitors is recognised; real forms and ordinary text are not', async () => {
+    const page = (text) => ({ frames: () => [{ evaluate: async () => text }] });
+    assert.ok(/restricted/i.test(await domLib.detectBotBlock(page('Access is temporarily restricted\nWe detected unusual activity from your device or network.\nAutomated (bot) activity on your network'))));
+    assert.strictEqual(await domLib.detectBotBlock(page('Apply\nFirst name\nLast name\nEmail\n'.repeat(150))), null);
+    assert.strictEqual(await domLib.detectBotBlock(page('Responsibilities: manage access control systems.')), null);
+  });
+  await check('resume repair prefers the install copy, so employers see the original file name source', async () => {
+    const os = require('os'); const fs = require('fs');
+    const { createStore } = require(path.join(ROOT, 'electron', 'store'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-feat-'));
+    const st = createStore(dir);
+    fs.writeFileSync(path.join(dir, 'resumes', 'abc.pdf'), Buffer.alloc(100, 1));
+    st.resumes.set({ items: [{ id: 'abc', name: 'r', fileName: 'My_Resume.pdf', path: 'C:\\somewhere\\else\\abc.pdf' }] });
+    assert.strictEqual(resumeLib.repairResumePaths(st), 1);
+    assert.ok(st.resumes.get().items[0].path.startsWith(dir));
+    st.flushAll(); fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   console.log('\nCurrent employer');
   const profile = {
     currentCompany: 'Acme Technologies Pvt. Ltd.',

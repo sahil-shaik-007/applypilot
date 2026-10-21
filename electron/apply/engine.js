@@ -573,6 +573,8 @@ class ApplyEngine {
       throwIfAborted(signal);
       result.filledCount = fill.filledCount || 0;
       result.unanswered = fill.unanswered || [];
+      // Nothing could be filled: is the site refusing automated visitors? Say so plainly (we never work around it).
+      if (!result.filledCount) result.botBlocked = await dom.detectBotBlock(page);
       const requiredMissing = result.unanswered.filter((u) => u.required);
       emit('step', `Filled ${result.filledCount} field(s); ${result.unanswered.length} unanswered (${requiredMissing.length} required)`, { filledCount: result.filledCount, unanswered: result.unanswered });
 
@@ -623,7 +625,7 @@ class ApplyEngine {
       } else if (assisted) {
         emit('needs-user', 'This site is assisted-only: review the pre-filled form and submit it yourself.', { unanswered: result.unanswered });
       } else {
-        emit('needs-user', result.filledCount ? 'Form filled — review it and click submit in the browser.' : 'Could not find an application form to fill on this page — please apply in the browser tab that opened.', { unanswered: result.unanswered });
+        emit('needs-user', result.filledCount ? 'Form filled — review it and click submit in the browser.' : (result.botBlocked ? `This site is blocking automated access from your network ("${result.botBlocked}"). ApplyPilot does not try to get around that: apply in the browser tab that opened, or try again later.` : 'Could not find an application form to fill on this page — please apply in the browser tab that opened.'), { unanswered: result.unanswered });
       }
 
       // ---------------- review / assisted: hand over to the user and watch -------------

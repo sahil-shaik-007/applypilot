@@ -188,6 +188,13 @@ function scoreJob(job, { resumeText = '', profile = {}, campaign = {} } = {}) {
 function isExcluded(job, { profile = {}, campaign = {} } = {}) {
   const el = eligibility(job, profile);
   if (!el.ok) return el.blockers[0];
+  // A beginner is not queued for roles that ask for several more years than they have (a fresher was being shown
+  // 5-10 year roles as top matches). Switch off per campaign with skipExperienceGap: false.
+  const have = Number(profile.totalYearsExperience);
+  if (campaign.skipExperienceGap !== false && profile.totalYearsExperience !== undefined && profile.totalYearsExperience !== '' && !Number.isNaN(have)) {
+    const need = yearsRequired(job.description);
+    if (need != null && need - have >= 3) return `Asks for ~${need}+ years of experience (you have ${have})`;
+  }
   if (needsVisa(profile) && sponsorshipSignal(job) === 'not-offered' && campaign.skipNoSponsorship !== false) return "Employer doesn't sponsor visas";
   const companies = [...(profile.excludeCompanies || []), ...(campaign.excludeCompanies || [])].map((s) => s.toLowerCase().trim()).filter(Boolean);
   if (companies.some((c) => (job.company || '').toLowerCase().includes(c))) return 'Company is on your exclude list';

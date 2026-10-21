@@ -988,6 +988,9 @@ module.exports = { answerFromProfile, bestOption, norm, polarity, parseRange, co
     const type = (el.getAttribute('type') || (tg === 'INPUT' ? 'text' : tg.toLowerCase())).toLowerCase();
     if (tg === 'INPUT' && type === 'password') continue; // never touch credentials
     if (tg === 'INPUT' && /^(hidden|submit|button|reset|image|search)$/.test(type) && el.getAttribute('role') !== 'combobox') continue;
+    // Decoys: text-like fields that are aria-hidden and not reachable by keyboard are the page's own helpers, not
+    // questions (typing into them corrupted the Address box).
+    if ((tg === 'INPUT' || tg === 'TEXTAREA') && !/^(radio|checkbox|file)$/.test(type) && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     if (type === 'search' && /iti__/.test(el.className)) continue;
     if (excluded(el)) continue;
     if (el.disabled || el.readOnly && el.getAttribute('role') !== 'combobox' && tg !== 'SELECT') { if (type !== 'file') continue; }

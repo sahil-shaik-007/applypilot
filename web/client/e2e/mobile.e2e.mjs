@@ -146,6 +146,9 @@ async function main() {
   await check('dev login', async () => {
     await page.fill('input[type="email"]', EMAIL);
     await page.click('[data-testid="dev-login"] button[type="submit"]');
+    await page.getByText('What should we call you?').waitFor({ timeout: 15000 });
+    await page.fill('input[placeholder="Your name"]', 'Jane Testerson');
+    await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByText('Create your vault').waitFor({ timeout: 15000 });
     const me = await api('/me');
     assert(me.status === 200 && me.body.user.email === EMAIL && me.body.hasVault === false, `unexpected /me ${me.status}`);

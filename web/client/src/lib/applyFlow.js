@@ -13,7 +13,7 @@ import { getProfile, allProfiles, pickResumeFor, snapshotOf, profileIdOf, DEFAUL
 import { missingIdentity } from './applyReadiness.js';
 import { coverLetter as aiCoverLetter, answerQuestion as aiAnswer, aiError, DEFAULT_MODEL } from './ai.js';
 import { generateTailored } from './tailored.js';
-import { nat, canApplyInApp, notify, haptic } from './bridge.js';
+import { nat, canApplyInApp, applyTarget, notify, haptic } from './bridge.js';
 import { patchCampaign } from './campaigns.js';
 import { bestAnswerFor, rememberQuestionsFor, saveAnswerFor, saveAiAnswer, answersForFiller } from './answers.js';
 
@@ -166,7 +166,7 @@ export function preflight(app, job, profile) {
  * daily cap, no resume). `force` skips the eligibility (not scam) check after the user confirmed.
  */
 export async function applyInApp(app, applicationId, { mode, force = false } = {}) {
-  if (!canApplyInApp()) throw new Error('In-app auto-fill needs the ApplyPilot phone app.');
+  if (!canApplyInApp()) throw new Error('Auto-fill needs the ApplyPilot phone app, or the ApplyPilot browser extension on this computer (Settings → Browser helper).');
   if (sessions.has(applicationId) && ['running', 'countdown'].includes(sessions.get(applicationId).phase)) throw new Error('Already applying to this job.');
   const a = getApplication(app, applicationId);
   if (!a) throw new Error('Application not found');
@@ -207,7 +207,7 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
   const apiKey = settings.anthropicKey;
   try {
     step('Preparing application');
-    await patchApplication(app, a.id, { status: 'in-progress', attemptedAt: new Date().toISOString(), appliedVia: 'phone-app' }, 'Applying in the ApplyPilot app');
+    await patchApplication(app, a.id, { status: 'in-progress', attemptedAt: new Date().toISOString(), appliedVia: applyTarget() === 'browser' ? 'browser-extension' : 'phone-app' }, applyTarget() === 'browser' ? 'Applying in your browser' : 'Applying in the ApplyPilot app');
     const resume = await resumeUpload(app, a, job, campaign, apiKey, step, pid);
     const base = pickResumeFor(app, job, a.resumeId || 'auto', pid);
     const letter = await buildCoverLetter(app, getApplication(app, a.id), job, campaign ? campaign.coverLetter : 'ai', apiKey, base ? base.text : '', profile);
@@ -217,6 +217,15 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
     step(`Opening the application with ${resume.tailored ? 'your tailored resume' : `"${resume.name}"`}`);
     const answers = answersForFiller(app.sync.list('qa'), pid);
     const result = await nat().applyInApp({
+      applicationId: a.id,
+      // The browser extension reports "filled" while the form is still open in its tab; a later confirmed submission lands here.
+      onLate: async (r) => {
+        if (!r || r.status !== 'submitted') return;
+        const now = new Date().toISOString();
+        await patchApplication(app, a.id, { status: 'applied', appliedAt: now, followUpAt: new Date(Date.now() + 7 * 86400000).toISOString(), pendingSubmitUntil: null, ...(r.url ? { finalUrl: r.url } : {}) }, { type: 'submitted', message: 'Submitted (confirmed on the site)' }).catch(() => {});
+        if (campaign) await patchCampaign(app, campaign.id, (c) => ({ stats: { ...(c.stats || {}), applied: ((c.stats || {}).applied || 0) + 1 } })).catch(() => {});
+        notify('Application submitted', `${job.title} at ${job.company}`, { route: 'applied', applicationId: a.id });
+      },
       job,
       profile,
       answers,
@@ -266,6 +275,16 @@ export async function applyInApp(app, applicationId, { mode, force = false } = {
     upd(a.id, { phase: 'done', status: 'failed', error: e.message });
     throw e;
   }
+}
+
+/**
+ * A run that was in progress when this page was reloaded or closed has no live session any more. Rather than showing
+ * "Applying…" forever it goes back to "waiting for you" with a note.
+ */
+export async function recoverInterrupted(app) {
+  const stuck = (app.applications || []).filter((a) => a.status === 'in-progress' && !sessions.has(a.id));
+  for (const a of stuck) await patchApplication(app, a.id, { status: 'awaiting-you', pendingSubmitUntil: null }, { type: 'step', message: 'This run was interrupted (the page was reloaded or closed). Open it again to finish.' }).catch(() => {});
+  return stuck.length;
 }
 
 /** Starts an in-app application for a job from the job sheet (creates the tracker entry). */

@@ -407,6 +407,8 @@ async function liveUrls() {
     pop = await openPopup(tid);
     check('form detected in popup', !(await pop.isHidden('#formCard')) && /resume upload/.test(await pop.textContent('#formFields')));
     await pop.click('#fillBtn');
+    await pop.waitForSelector('#confirmFill:not([disabled])', { timeout: 20000 }); // v1.5+: the check panel comes first, nothing changes until the user confirms
+    await pop.click('#confirmFill');
     await pop.waitForSelector('#fillMsg.warn, #fillMsg.ok, #fillMsg.err', { timeout: 30000 });
     const fillText = await pop.textContent('#fillMsg');
     const v = await form.evaluate(() => {
@@ -420,7 +422,7 @@ async function liveUrls() {
         toast: !!document.getElementById('__applypilot_toast'),
       };
     });
-    check('autofill: names, email, phone', v.first === 'Asha' && v.last === 'Rao' && v.email === 'asha.rao@example.com' && v.phone === '+91 9876543210', `${v.first} ${v.last} ${v.email} ${v.phone}`);
+    check('autofill: names, email, phone', v.first === 'Asha' && v.last === 'Rao' && v.email === 'asha.rao@example.com' && v.phone === '9876543210', `${v.first} ${v.last} ${v.email} ${v.phone}`);
     check('autofill: LinkedIn URL', v.linkedin === 'https://www.linkedin.com/in/asha-rao-test');
     check('autofill: work authorisation select = Yes', v.auth === 'Yes', v.auth);
     check('autofill: sponsorship radio = No', v.sponsor === 'no', v.sponsor);

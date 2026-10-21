@@ -51,7 +51,7 @@ export function ApplyHost() {
   const close = () => (done ? dismissSession(s.id) : null);
   return (
     <Sheet open={!!s} onClose={close} label="Applying" header={(
-      <div><h2 style={{ marginTop: 2 }}>{done ? (s.status === 'applied' ? 'Application submitted' : s.status === 'failed' ? 'Could not finish' : 'Waiting for you') : s.phase === 'countdown' ? 'About to submit' : 'Applying in the app…'}</h2>
+      <div><h2 style={{ marginTop: 2 }}>{done ? (s.status === 'applied' ? 'Application submitted' : s.status === 'failed' ? 'Could not finish' : 'Waiting for you') : s.phase === 'countdown' ? 'About to submit' : 'Applying…'}</h2>
         <div className="small muted ellipsis">{s.job.title} · {s.job.company}</div></div>
     )} footer={s.phase === 'countdown' ? (
       <>

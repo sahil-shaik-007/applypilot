@@ -192,6 +192,8 @@ function isExcluded(job, { profile = {}, campaign = {} } = {}) {
   if (campaign.skipExperienceGap !== false && profile.totalYearsExperience !== undefined && profile.totalYearsExperience !== '' && !Number.isNaN(have)) {
     const need = yearsRequired(job.description);
     if (need != null && need - have >= 3) return `Asks for ~${need}+ years of experience (you have ${have})`;
+    // A fresher (0-1 years) is not shown "Senior", "Staff", "Principal" or "Lead" roles at all, whatever the text says.
+    if (have <= 1 && SENIOR.test(job.title || '') && !/\b(intern|internship|junior|jr\.?|graduate|fresher|entry[- ]level|trainee)\b/i.test(job.title || '')) return `Senior-level role (you have ${have} year${have === 1 ? '' : 's'} of experience)`;
   }
   if (needsVisa(profile) && sponsorshipSignal(job) === 'not-offered' && campaign.skipNoSponsorship !== false) return "Employer doesn't sponsor visas";
   const companies = [...(profile.excludeCompanies || []), ...(campaign.excludeCompanies || [])].map((s) => s.toLowerCase().trim()).filter(Boolean);

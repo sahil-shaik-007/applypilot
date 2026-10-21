@@ -11,7 +11,7 @@ import { allProfiles, getProfile, pickResumeFor, resumePool, profileIdForJob } f
 import { qaVisibleTo } from '../lib/answers.js';
 import { safeId } from '../lib/sync.js';
 import { coverLetter, tailorResume, outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
-import { canApplyInApp, openUrl } from '../lib/bridge.js';
+import { useApplyTarget, openUrl } from '../lib/bridge.js';
 import { ApplyCheck } from './applyCheck.jsx';
 import { allConnections, peopleAt, researchLinks } from '../lib/network.js';
 import { marketPay } from '../lib/insights.js';
@@ -191,7 +191,9 @@ export function JobSheet({ job, onClose }) {
 
   const run = async (k, fn, ok) => { setBusy(k); try { await fn(); if (ok) app.toast(ok, 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } };
   // Apply in app exists only in the phone app; a normal browser sends to the PC or opens the job page.
-  const native = canApplyInApp();
+  const target = useApplyTarget();
+  const native = target !== 'none';
+  const applyWord = target === 'browser' ? 'Apply in browser' : 'Apply in app';
   // The person this application is for: picked in the Apply tab, else the job's campaign or the default profile.
   const activePid = pick || (job ? profileIdForJob(app, job) : 'main');
   const applyHere = async () => {
@@ -221,7 +223,7 @@ export function JobSheet({ job, onClose }) {
           <div className="col" style={{ gap: 8, width: '100%' }}>
             {scam && <div className="tiny" style={{ color: 'var(--red)', textAlign: 'center' }}>Applying is disabled: this posting looks like a scam. Never pay a fee or share ID documents.</div>}
             {native ? (
-              <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={Zap} loading={busy === 'inapp'} onClick={applyHere} disabled={scam} data-testid="apply-here" block>Apply in app</Button>
+              <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={Zap} loading={busy === 'inapp'} onClick={applyHere} disabled={scam} data-testid="apply-here" block>{applyWord}</Button>
             ) : (
               <Button variant="gradient" className={scam ? '' : 'btn-gradient'} size="lg" icon={queued ? Check : Laptop} disabled={queued || scam} data-testid="send-laptop" onClick={() => setChecking(true)} block>{queued ? 'Queued for your PC' : 'Send to my PC'}</Button>
             )}
@@ -271,14 +273,14 @@ export function JobSheet({ job, onClose }) {
                   <div>
                     <span className="label">{native ? 'How to apply' : 'Apply mode'}</span>
                     <Seg full value={mode} onChange={setMode} options={[{ value: 'review', label: 'Fill, I submit' }, { value: 'auto', label: 'Autopilot' }]} />
-                    <div className="small muted" style={{ marginTop: 8 }}>{mode === 'auto' ? (canAuto ? `Fills every field and submits after a ${app.settings.submitDelaySeconds ?? 30}s cancel window when every required answer is known; anything uncertain waits for you. Applies to "Apply in app" and "Send to laptop".` : 'This site doesn\'t allow automated submission, so ApplyPilot fills it and you press submit.') : 'The form opens filled in. You review it and press submit.'}</div>
+                    <div className="small muted" style={{ marginTop: 8 }}>{mode === 'auto' ? (canAuto ? `Fills every field and submits after a ${app.settings.submitDelaySeconds ?? 30}s cancel window when every required answer is known; anything uncertain waits for you. Applies to "${applyWord}" and "Send to laptop".` : 'This site doesn\'t allow automated submission, so ApplyPilot fills it and you press submit.') : 'The form opens filled in. You review it and press submit.'}</div>
                   </div>
                 </div>
                 <TailoredCard job={job} resumeId={resumeId} profileId={activePid} />
                 <div className="card pad col" style={{ gap: 10 }}>
-                  <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />Applying on your phone</div>
-                  <div className="small muted">{native ? 'Apply in app opens the form inside ApplyPilot and fills it from your profile, answers and resume. Quick-fill gives one-tap copy for every field.' : 'We open the application in a new tab and give you one-tap copy for every field.'}</div>
-                  {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} disabled={scam} onClick={applyHere} data-testid="apply-inapp">Apply in app</Button>}
+                  <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />{target === 'browser' ? 'Applying in this browser' : 'Applying on your phone'}</div>
+                  <div className="small muted">{target === 'browser' ? 'Apply in browser opens the application in a new tab and the ApplyPilot extension fills it from your profile, answers and resume. You press Submit. Quick-fill gives one-tap copy for every field.' : native ? 'Apply in app opens the form inside ApplyPilot and fills it from your profile, answers and resume. Quick-fill gives one-tap copy for every field.' : 'We open the application in a new tab and give you one-tap copy for every field. To have the form filled for you on this computer, add the ApplyPilot browser helper (Settings → Browser helper).'}</div>
+                  {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} disabled={scam} onClick={applyHere} data-testid="apply-inapp">{applyWord}</Button>}
                   <Button icon={Copy} disabled={scam} onClick={() => setQuick(true)} data-testid="open-quickfill">Open Quick-fill</Button>
                   <Button icon={Check} loading={busy === 'applied'} disabled={application && application.status === 'applied'} onClick={() => run('applied', () => upsertApplication(app, job, 'applied', { resumeId, profileId: activePid }), 'Marked as applied')}>Mark as applied</Button>
                 </div>

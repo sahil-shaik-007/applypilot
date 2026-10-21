@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Trash2, Check, Loader2, User, MapPin, Link, ShieldCheck, Target, Briefcase, Building2, GraduationCap, Award, FolderGit2, Users, HeartHandshake, FileText, Circle, ChevronDown, CircleAlert, Wand2, Pencil, X } from 'lucide-react';
-import { displaySkill } from '@shared/match.js';
+import { resumeFill } from '../lib/resumeProfile.js';
 import { useApp } from '../lib/store.jsx';
 import { createProfile, renameProfile, deleteProfile, DEFAULT_PROFILE_ID } from '../lib/profiles.js';
 import { Button, Field, TagInput, MultiChips, Seg, Switch, ScoreRing } from '../components/ui.jsx';
@@ -53,7 +53,7 @@ function SectionForm({ section, values, set, app }) {
               </div>
               <div className="grid g2-md" style={{ gap: 14 }}>
                 {section.fields.map((f) => (
-                  <Field key={f.key} label={f.label} className={wide(f) ? 'span-all' : ''}>
+                  <Field key={f.key} label={f.label} className={wide(f) ? 'span-all' : ''} group={['yesno', 'multiselect'].includes(f.type)}>
                     <FieldInput f={f} value={it[f.key]} onChange={(v) => update(i, f.key, v)} />
                   </Field>
                 ))}
@@ -68,7 +68,7 @@ function SectionForm({ section, values, set, app }) {
   return (
     <div className="grid g2-md" style={{ gap: 16 }}>
       {section.fields.map((f) => (
-        <Field key={f.key} label={f.label} required={f.required} help={f.help} className={wide(f) ? 'span-all' : ''}>
+        <Field key={f.key} label={f.label} required={f.required} help={f.help} className={wide(f) ? 'span-all' : ''} group={['yesno', 'multiselect'].includes(f.type)}>
           <FieldInput f={f} value={values[f.key]} onChange={(v) => set(f.key, v)} />
         </Field>
       ))}
@@ -176,12 +176,12 @@ function ProfileEditor({ profile, onDeleted }) {
 
   const pct = useMemo(() => profileCompletion(values), [values]);
   const resume = app.resumes.find((r) => r.isDefault) || app.resumes[0];
-  const importSkills = () => {
-    const have = new Set((values.skills || []).map((s) => s.toLowerCase()));
-    const add = (resume.skills || []).map(displaySkill).filter((s) => !have.has(s.toLowerCase()));
-    if (!add.length) { app.toast('No new skills found in your resume', 'info'); return; }
-    set('skills', [...(values.skills || []), ...add]);
-    app.toast(`Added ${add.length} skills from "${resume.name}"`, 'success');
+  // Fills only the empty fields (name, email, phone, birth date, languages, state, education, skills) from the resume.
+  const importFromResume = () => {
+    const { patch, labels } = resumeFill(values, resume.text);
+    if (!labels.length) { app.toast('Nothing new to add: your profile already has what the resume states.', 'info'); return; }
+    for (const [k, v] of Object.entries(patch)) set(k, v);
+    app.toast(`Added ${labels.join(', ')} from "${resume.name}"`, 'success');
   };
 
   return (
@@ -209,7 +209,7 @@ function ProfileEditor({ profile, onDeleted }) {
         <span className="muted row" style={{ gap: 6 }}>
           {saveState === 'saving' || saveState === 'dirty' ? <><Loader2 size={13} className="spin" />Saving…</> : saveState === 'error' ? <><CircleAlert size={13} color="var(--red)" />Not saved</> : <><Check size={13} color="var(--green)" />Saved & encrypted</>}
         </span>
-        {resume && (resume.skills || []).length > 0 && <Button size="sm" variant="ghost" icon={Wand2} onClick={importSkills}>Skills from resume</Button>}
+        {resume && (resume.text || (resume.skills || []).length > 0) && <Button size="sm" variant="ghost" icon={Wand2} onClick={importFromResume} data-testid="fill-from-resume">Fill from resume</Button>}
       </div>
       <div className="col" style={{ gap: 8 }}>
         {schema.sections.map((s) => {

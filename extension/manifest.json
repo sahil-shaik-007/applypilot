@@ -2,11 +2,16 @@
   "manifest_version": 3,
   "name": "ApplyPilot — Save jobs & autofill applications",
   "short_name": "ApplyPilot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Save any job posting to the ApplyPilot desktop app, see your match score, and autofill application forms. You always click Submit.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://127.0.0.1/*"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://*/*"],
+  "content_scripts": [{
+    "matches": ["http://localhost:5174/*", "http://localhost:8787/*", "http://localhost:8790/*", "http://127.0.0.1:8787/*"],
+    "js": ["content/webapp-bridge.js"],
+    "run_at": "document_start"
+  }],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_title": "ApplyPilot",

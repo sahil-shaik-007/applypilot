@@ -17,6 +17,9 @@ const SORTS = { score: 'Best match', newest: 'Newest first', salary: 'Highest sa
 const DEFAULT_F = { minScore: 0, autoOnly: false, hasSalary: false, days: 0, hideDone: true, source: 'all', text: '', sponsors: false, canTake: true };
 const NO_SPONSOR = "Employer doesn't sponsor visas";
 const isPhone = () => window.matchMedia('(max-width: 768px)').matches;
+// Role words that beginners search for; shown as one-tap searches when the profile says entry level.
+const ENTRY_TERMS = ['Graduate trainee', 'Trainee engineer', 'Junior engineer', 'Associate engineer', 'Apprentice', 'Intern', 'Fresher'];
+const isBeginner = (p) => { const y = Number(p.totalYearsExperience); return /^(intern|entry level)/i.test(p.seniority || '') || (p.totalYearsExperience !== undefined && p.totalYearsExperience !== '' && !Number.isNaN(y) && y <= 1); };
 
 function statsList(stats) {
   if (!stats) return [];
@@ -43,16 +46,18 @@ export default function Jobs({ params }) {
   const [showStats, setShowStats] = useState(false);
   const resultsRef = useRef(null);
 
-  const search = async (e) => {
-    if (e) e.preventDefault();
-    if (!query.trim()) { app.toast('Type a job title to search', 'error'); return; }
+  const search = async (e, override) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const text = (typeof override === 'string' ? override : query).trim();
+    if (!text) { app.toast('Type a job title to search', 'error'); return; }
+    if (text !== query.trim()) setQuery(text);
     setLoading(true); setStats(null);
     try {
-      const qs = new URLSearchParams({ q: query.trim(), location: location.trim(), remote });
+      const qs = new URLSearchParams({ q: text, location: location.trim(), remote });
       const r = await api(`/jobs/search?${qs}`);
       const jobs = Array.isArray(r.jobs) ? r.jobs : [];
       rememberJobs(jobs);
-      lastSearch = { q: query.trim(), location: location.trim(), remote, jobs, stats: r.stats || null, at: Date.now() };
+      lastSearch = { q: text, location: location.trim(), remote, jobs, stats: r.stats || null, at: Date.now() };
       setRaw(jobs); setStats(r.stats || null);
       setView(isPhone() ? 'swipe' : 'list');
       if (!jobs.length) app.toast('No jobs found. Try a broader title or location.', 'info');
@@ -66,7 +71,9 @@ export default function Jobs({ params }) {
   const resumeText = defaultResume ? defaultResume.text || '' : '';
   const statusByJob = useMemo(() => new Map(app.applications.map((a) => [a.jobId, a.status])), [app.applications]);
   const queuedIds = useMemo(() => new Set(app.outbox.map((o) => o.jobId)), [app.outbox]);
-  const { jobs, excluded } = useMemo(() => {
+  // Scoring hundreds of jobs is the slow part. It depends only on the results, the resume and the profile, so it is
+  // computed once; the applied/queued status is laid over it separately (every tracker write used to re-score everything).
+  const { scored, excluded } = useMemo(() => {
     let ex = 0;
     const out = [];
     for (const j of raw) {
@@ -76,10 +83,11 @@ export default function Jobs({ params }) {
       // Your own exclude lists hide a job outright; eligibility problems are shown (red) and filterable.
       if (reason && el.ok && reason !== NO_SPONSOR) { ex++; continue; }
       const blockers = [...(el.blockers || []), ...(reason === NO_SPONSOR ? [reason] : [])];
-      out.push({ ...j, match, blockers, scam: (el.scam || []).length > 0, canTake: !blockers.length, appStatus: statusByJob.get(j.id) || (queuedIds.has(j.id) ? 'queued' : undefined) });
+      out.push({ ...j, match, blockers, scam: (el.scam || []).length > 0, canTake: !blockers.length });
     }
-    return { jobs: out, excluded: ex };
-  }, [raw, resumeText, profile, statusByJob, queuedIds]);
+    return { scored: out, excluded: ex };
+  }, [raw, resumeText, profile]);
+  const jobs = useMemo(() => scored.map((j) => ({ ...j, appStatus: statusByJob.get(j.id) || (queuedIds.has(j.id) ? 'queued' : undefined) })), [scored, statusByJob, queuedIds]);
 
   const sources = useMemo(() => [...new Set(jobs.map((j) => j.source).filter(Boolean))], [jobs]);
   const shown = useMemo(() => {
@@ -105,6 +113,13 @@ export default function Jobs({ params }) {
   const sponsorCount = jobs.filter((j) => j.match.sponsorship === 'offered').length;
   const cantTake = jobs.filter((j) => !j.canTake).length;
   const sl = statsList(stats);
+  // One-tap searches: the titles in your profile first, then (for beginners) the role words freshers use.
+  const suggestions = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const t of [...(profile.desiredTitles || []), ...(isBeginner(profile) ? ENTRY_TERMS : [])]) { const k = String(t).toLowerCase().trim(); if (k && !seen.has(k)) { seen.add(k); out.push(String(t).trim()); } }
+    return out.slice(0, 9);
+  }, [profile]);
 
   return (
     <div className="col" style={{ gap: 14 }}>
@@ -116,6 +131,11 @@ export default function Jobs({ params }) {
         </div>
         <Seg full value={remote} onChange={setRemote} options={[{ value: 'any', label: 'Any' }, { value: 'remote', label: 'Remote' }, { value: 'onsite', label: 'On-site' }]} />
       </form>
+      {suggestions.length > 0 && (
+        <div className="chips" data-testid="search-suggestions" aria-label="Suggested searches">
+          {suggestions.map((t) => <button type="button" key={t} className="chip" onClick={() => search(null, t)}>{t}</button>)}
+        </div>
+      )}
 
       <AnimatePresence>
         {(loading || sl.length > 0) && (

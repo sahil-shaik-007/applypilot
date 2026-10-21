@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Builds extension/dist/applypilot-extension.zip for the Chrome Web Store and Microsoft Edge Add-ons.
 //   node extension/tools/package.js
-// Checks: shared.js in sync with the desktop logic, manifest permissions are the minimal set,
+// Checks: generated files (shared.js, apply-engine.js, ats.js) in sync with the app code, manifest permissions are the minimal set,
 // no remote code (no http(s) script/src references), then zips everything except tools/, store/, dist/.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { build, OUT } = require('./sync-shared');
+const { TARGETS } = require('./sync-shared');
 
 const EXT = path.join(__dirname, '..');
 const DIST = path.join(EXT, 'dist');
@@ -60,13 +60,20 @@ function walk(dir, rel = '') {
 
 function checks(files) {
   const problems = [];
-  const cur = fs.readFileSync(OUT, 'utf8').replace(/\r\n/g, '\n');
-  if (cur !== build()) problems.push('content/shared.js is stale — run node extension/tools/sync-shared.js');
+  for (const tg of TARGETS) {
+    const rel = path.relative(EXT, tg.out).replace(/\\/g, '/');
+    const cur = fs.existsSync(tg.out) ? fs.readFileSync(tg.out, 'utf8').replace(/\r\n/g, '\n') : '';
+    if (cur !== tg.build()) problems.push(`${rel} is stale — run node extension/tools/sync-shared.js`);
+  }
   const m = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
   const perms = [...(m.permissions || [])].sort().join(',');
   if (perms !== 'activeTab,scripting,storage') problems.push(`unexpected permissions: ${perms}`);
-  if (JSON.stringify(m.host_permissions) !== '["http://127.0.0.1/*"]') problems.push(`unexpected host_permissions: ${JSON.stringify(m.host_permissions)}`);
-  if (m.content_scripts) problems.push('static content_scripts are not allowed (inject on demand with activeTab)');
+  // https://*/* is needed to inject the auto-fill engine into employer sites for "Apply in browser" from the web app.
+  if (JSON.stringify(m.host_permissions) !== '["http://127.0.0.1/*","http://localhost/*","https://*/*"]') problems.push(`unexpected host_permissions: ${JSON.stringify(m.host_permissions)}`);
+  // The only static content script is the web app bridge, and only on local development addresses (other addresses are registered from the options page).
+  const cs = m.content_scripts || [];
+  const csOk = cs.length === 1 && JSON.stringify(cs[0].js) === '["content/webapp-bridge.js"]' && cs[0].matches.every((x) => /^http:\/\/(localhost|127\.0\.0\.1):\d+\/\*$/.test(x));
+  if (cs.length && !csOk) problems.push('static content_scripts may only be the web app bridge on localhost ports');
   for (const f of files.filter((x) => /\.(html|js)$/.test(x))) {
     const t = fs.readFileSync(path.join(EXT, f), 'utf8');
     if (/<script[^>]+src=["']https?:/i.test(t) || /importScripts\(\s*['"]https?:/.test(t) || /\beval\(|new Function\(/.test(t)) problems.push(`${f}: remote or dynamic code`);

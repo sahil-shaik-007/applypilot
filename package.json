@@ -1,7 +1,7 @@
 {
   "name": "applypilot",
   "productName": "ApplyPilot",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "ApplyPilot — search every job board at once and run parallel auto-apply campaigns with the right resume for every role.",
   "author": {
     "name": "ApplyPilot",

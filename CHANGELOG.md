@@ -2,6 +2,29 @@
 
 All notable changes to ApplyPilot. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.10.0] — 2026-10-21
+
+The web app can now apply from a desktop browser. Found by using the web app end to end in Edge with a real resume (fresher, ECE graduate) on real job boards.
+
+### Added
+- **Apply in browser (web app + extension).** A web page cannot fill another site's form, so on a laptop the web app could only copy fields or send the job to the Windows app. The ApplyPilot extension is now the web app's native layer: **Apply in browser** opens the job in a new tab, fills it from your profile, answers and resume, asks the web app for answers it does not know, and reports back. You review and press Submit. Protocol and safety rules: [docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md). Settings → **Browser helper** shows whether it is connected and has the download and steps.
+- **Profile from resume (web).** Uploading a resume fills the empty profile fields (name, email, phone, date of birth, nationality, languages, state, education, skills). **Fill from resume** on the Profile page does the same on demand. Nothing you typed is overwritten.
+- **Suggested searches** under the job search: your target titles, and for beginners "Graduate trainee", "Trainee engineer", "Junior engineer", "Associate engineer", "Apprentice", "Intern", "Fresher".
+- Extension 1.1.0 (web-app mode, Options → Web app address).
+
+### Fixed
+- **The web app froze for seconds on every save while search results were open.** All 500 results were re-scored after every tracker write (an apply took 52 s of mostly waiting, now 3 s).
+- **Yes/No buttons were pressed by tapping the question text** (the question was a `<label>` around the buttons, so a tap selected Yes).
+- **YES/NO groups built from `role="radio"` (Workable) were reported as filled but never selected** in the phone/in-page engine. The state is read back now and the label / Space key fallbacks are tried, as in the desktop engine.
+- **"Applying…" stayed forever** after the page was reloaded during a run; such runs return to "waiting for you". With the extension the result is reported as soon as the form is filled (the tab stays open), and a later confirmed submission marks the application as applied.
+- **A beginner was shown Senior / Staff / Principal / Lead roles.** For 0-1 years of experience those titles are hidden (trainee / junior / graduate titles stay). Switch off per campaign with `skipExperienceGap: false`.
+- **Cover letter said "With 0 years of experience in…"**; it now says "As a recent graduate skilled in…".
+- The home greeting used the sign-in name instead of the name you chose; the resume upload text said "on this phone".
+- The resume reader takes labelled personal details only (date of birth, nationality, languages known, state).
+
+### Tests
+- New: `scripts/test-extension-web.js` (44), `web/client/e2e/browser-helper.e2e.mjs` (12), feature units 25/25, extension pairing 76/76 (two stale assertions fixed), server 110/110.
+
 ## [1.9.0] — 2026-10-21
 
 Found by applying for real, with a real resume, on real job boards (fill-only; nothing was submitted without a person pressing Submit).

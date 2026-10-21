@@ -5,9 +5,9 @@ import { AppProvider, useApp, useRoute, go } from './lib/store.jsx';
 import { Toasts, ConfirmSheet, Button } from './components/ui.jsx';
 import { Brand, Mark } from './components/Brand.jsx';
 import { ApplyHost, CampaignScheduler } from './components/apply.jsx';
-import { openQuestions } from './lib/applyFlow.js';
+import { openQuestions, recoverInterrupted } from './lib/applyFlow.js';
 import { saveJob } from './lib/apply.js';
-import { nat } from './lib/bridge.js';
+import { nat, detectExtension } from './lib/bridge.js';
 import { profileIdOfApplication } from './lib/profiles.js';
 import Landing from './pages/Landing.jsx';
 import { CreateVault, Unlock, AskName } from './pages/Vault.jsx';
@@ -78,6 +78,18 @@ function ShareReceiver() {
   return null;
 }
 
+/** Looks for the ApplyPilot browser extension when the app opens and whenever you come back to this tab. */
+function ExtensionWatcher() {
+  useEffect(() => {
+    if (nat().isNative) return undefined;
+    detectExtension();
+    const onVis = () => { if (!document.hidden) detectExtension(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  return null;
+}
+
 function Shell() {
   const app = useApp();
   const { page, params } = useRoute();
@@ -86,12 +98,14 @@ function Shell() {
   const needsYou = app.applications.filter((a) => a.status === 'awaiting-you' || a.status === 'queued').length;
   const waiting = app.applications.filter((a) => a.status === 'awaiting-you' && openQuestions(app.qa, a.unanswered, profileIdOfApplication(app, a)).some((i) => !i.answerRec)).length;
   useEffect(() => { document.title = `${def.title} · ApplyPilot`; }, [def.title]);
+  useEffect(() => { recoverInterrupted(app); }, []); // eslint-disable-line
   const Page = def.C;
   return (
     <div className="shell has-rail">
       <div className="rail-brand"><Brand /></div>
       <CampaignScheduler />
       <ShareReceiver />
+      <ExtensionWatcher />
       <ApplyHost />
       <header className="topbar">
         {def.parent ? <Button variant="ghost" icon={ChevronLeft} aria-label="Back" onClick={() => go(def.parent)} /> : <span style={{ display: 'grid', width: 44, placeItems: 'center' }}><Mark size={24} /></span>}

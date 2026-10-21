@@ -174,12 +174,24 @@ async function setChecked(el, checked) {
   return el.checked === checked;
 }
 const groupOpt = (key, i) => deepOne(`[data-ap-grp="${key}"][data-ap-opt="${i}"]`);
+// aria-pressed buttons and role=radio options (aria-checked) report their state back; it is read, never assumed.
 async function clickPressButton(key, i) {
   const b = deepOne(`[data-ap-id="${key}"][data-ap-opt="${i}"]`);
   if (!b) return false;
+  const known = b.hasAttribute('aria-pressed') || b.hasAttribute('aria-checked');
+  const isOn = () => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true';
   safeClick(b);
   await sleep(120);
-  return (b.getAttribute('aria-pressed') || 'true') === 'true';
+  if (known && !isOn()) {
+    // Some pages (Workable) only react to the option's own <label>/<input>, or to the Space key on the option.
+    const inner = b.querySelector('label,input');
+    if (inner) { inner.click(); await sleep(120); }
+    if (!isOn()) {
+      for (const t of ['keydown', 'keyup']) b.dispatchEvent(new KeyboardEvent(t, { key: ' ', code: 'Space', keyCode: 32, bubbles: true }));
+      await sleep(120);
+    }
+  }
+  return known ? isOn() : true;
 }
 
 // ------------------------------------------------------------------ comboboxes (react-select / ARIA)

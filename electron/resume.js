@@ -111,6 +111,32 @@ function guessEducation(text) {
   return out;
 }
 
+// Personal-information block details that resumes state with a label ("Date of Birth : 2nd November 2000").
+// Only labelled values are read, so nothing is guessed from stray dates or words.
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const IN_STATES = ['Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi'];
+function guessLabelled(t) {
+  const out = {};
+  const dob = t.match(/date\s+of\s+birth\s*[:\-]?\s*(\d{1,2})(?:st|nd|rd|th)?[\s\-\/.]+([A-Za-z]{3,9}|\d{1,2})[\s\-\/.,]+((?:19|20)\d{2})/i);
+  if (dob) {
+    const month = /^\d+$/.test(dob[2]) ? +dob[2] : MONTHS[dob[2].slice(0, 4).toLowerCase()] || MONTHS[dob[2].slice(0, 3).toLowerCase()];
+    const day = +dob[1];
+    const year = +dob[3];
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1950 && year <= new Date().getFullYear() - 15) out.dateOfBirth = year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+  const nat = t.match(/nationality\s*[:\-]\s*([A-Za-z]{3,20})/i);
+  if (nat) out.nationality = nat[1][0].toUpperCase() + nat[1].slice(1).toLowerCase();
+  const langs = t.match(/languages?\s+(?:known|spoken)\s*[:\-]\s*([^\n]{3,80})/i);
+  if (langs) {
+    const list = langs[1].split(/\s*(?:,|&|\band\b|\/)\s*/i).map((x) => x.replace(/[^A-Za-z ]/g, '').trim()).filter((x) => x.length >= 3 && x.length <= 20);
+    if (list.length && list.length <= 6) out.languages = list.map((x) => x[0].toUpperCase() + x.slice(1).toLowerCase());
+  }
+  const addr = t.match(/address\s*[:\-][\s\S]{0,260}/i);
+  const state = addr && IN_STATES.find((s) => new RegExp('\\b' + s + '\\b', 'i').test(addr[0]));
+  if (state) { out.state = state; out.country = 'India'; }
+  return out;
+}
+
 function guessProfile(text) {
   const t = text.replace(/\r/g, '');
   const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -154,6 +180,7 @@ function guessProfile(text) {
       }
     }
   }
+  Object.assign(out, guessLabelled(t));
   const edu = guessEducation(t);
   if (edu.length) out.education = edu;
   out.skills = extractSkills(t).map(displaySkill);

@@ -39,6 +39,18 @@
     <div id="pairMsg" class="msg hidden" style="margin-top:10px"></div>
   </section>
 
+  <section class="card" id="webCard">
+    <h2>Web app</h2>
+    <p class="small muted" style="margin:0 0 10px">Lets the ApplyPilot web app's <b>Apply in browser</b> button open a job in a new tab here and fill it with the same engine as the phone app, using the data the web app sends for that one application. Only the address you add below can talk to this extension, and it never fills passwords or solves CAPTCHAs.</p>
+    <div class="row"><span class="dot" id="webDot"></span><b id="webText">Not set</b></div>
+    <ul class="plain small muted" id="webList"></ul>
+    <div class="codebox" style="margin-top:8px">
+      <input id="webOrigin" type="url" autocomplete="off" placeholder="https://your-applypilot-web-app" aria-label="Web app address">
+      <button id="webAdd" class="btn primary">Add</button>
+    </div>
+    <div id="webMsg" class="msg hidden" style="margin-top:10px"></div>
+  </section>
+
   <section class="card">
     <h2>Autofill</h2>
     <label class="toggle"><input type="checkbox" id="attachResume"><span>Attach my resume when the form has a resume upload<br><span class="small muted">The file is fetched from the desktop app only at that moment, for that tab.</span></span></label>
@@ -60,7 +72,7 @@
 
   <section class="card small muted">
     <h2 style="color:var(--fg)">Privacy</h2>
-    The extension talks only to the ApplyPilot app on this computer (127.0.0.1). It reads a page only when you click the extension or use a shortcut. No analytics, no remote code, no ApplyPilot servers. It never submits applications, never fills passwords and never solves CAPTCHAs.
+    The extension talks only to the ApplyPilot app on this computer (127.0.0.1), to the web app address you add above, and, when you press Apply in browser, to the job's own site. It reads a page only when you click the extension or use a shortcut. No analytics, no remote code, no ApplyPilot servers. It never submits applications, never fills passwords and never solves CAPTCHAs.
   </section>
   <script src="options.js"></script>
 </body>

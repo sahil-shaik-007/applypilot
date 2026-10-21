@@ -41,7 +41,7 @@ export default function Home() {
   const completion = profileCompletion(p);
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const first = p.firstName || (app.user && app.user.name ? app.user.name.split(' ')[0] : '');
+  const first = p.firstName || (app.user && (app.user.displayName || app.user.name) ? (app.user.displayName || app.user.name).split(' ')[0] : '');
   const running = app.campaigns.filter((c) => c.status === 'running');
   const steps = [
     { done: app.resumes.length > 0, label: 'Upload your resume', go: 'resumes', icon: FileText },

@@ -7,6 +7,7 @@ import { Button, Empty, TagInput, Sheet, timeAgo, downloadFile } from '../compon
 import { ACCEPT, MAX_BYTES, extOf, extractResume, prettySkills } from '../lib/resumeParse.js';
 import { sha256Hex } from '../lib/sync.js';
 import { setResumeProfile, resumeGroup } from '../lib/profiles.js';
+import { fillProfileFromResume } from '../lib/resumeProfile.js';
 
 const MIME = { '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.txt': 'text/plain', '.md': 'text/markdown' };
 const kb = (n) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -118,6 +119,10 @@ export default function Resumes() {
         };
         try { await app.put('resumes', id, rec); } catch (e) { await app.sync.deleteBlob(blobId).catch(() => {}); throw e; }
         app.toast(parseError ? `Uploaded "${rec.name}", but its text couldn't be read.` : `Uploaded "${rec.name}" · ${skills.length} skills found`, parseError ? 'error' : 'success');
+        // Empty profile fields are filled from what the resume states (nothing already typed is overwritten).
+        if (!parseError) {
+          try { const added = await fillProfileFromResume(app, forProfile || 'main', rec); if (added.length) app.toast(`Filled ${added.length} empty profile field${added.length > 1 ? 's' : ''} from the resume: ${added.slice(0, 5).join(', ')}${added.length > 5 ? '…' : ''}`, 'success'); } catch { /* the profile can be filled later from the Profile page */ }
+        }
       } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(''); }
     }
     if (input.current) input.current.value = '';
@@ -139,7 +144,7 @@ export default function Resumes() {
         onDrop={(e) => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files); }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && input.current.click()}>
         {busy ? <Loader2 size={28} className="spin" color="var(--accent-2)" /> : <Upload size={28} color="var(--accent-2)" />}
         <div style={{ fontWeight: 700, marginTop: 8 }}>{busy || 'Upload a resume'}</div>
-        <div className="small muted">PDF, DOCX or TXT · read on this phone, encrypted before upload</div>
+        <div className="small muted">PDF, DOCX or TXT · read on this device, encrypted before upload</div>
         <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={(e) => upload(e.target.files)} data-testid="resume-file" />
       </div>
       <AnimatePresence>

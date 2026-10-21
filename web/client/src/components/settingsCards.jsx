@@ -1,11 +1,11 @@
 // Settings cards for phone parity: Applying (cancel window, caps, campaigns, notifications) and
 // Career pages (synced, encrypted `careerPages` records watched by the desktop app).
 import React, { useState } from 'react';
-import { Zap, Globe, Trash2, Plus, ExternalLink, Bell } from 'lucide-react';
+import { Zap, Globe, Trash2, Plus, ExternalLink, Bell, Puzzle, Download, RefreshCw, Copy } from 'lucide-react';
 import { newId } from '@shared/vaultCrypto.js';
 import { useApp } from '../lib/store.jsx';
-import { Button, Sheet, Field, Switch, Seg, timeAgo } from './ui.jsx';
-import { nat, openUrl } from '../lib/bridge.js';
+import { Button, Sheet, Field, Switch, Seg, timeAgo, copyText } from './ui.jsx';
+import { nat, openUrl, useApplyTarget, detectExtension, extSnapshot } from '../lib/bridge.js';
 
 export function ApplyingCard() {
   const app = useApp();
@@ -69,6 +69,35 @@ function AddCareerPage({ open, onClose }) {
         <div className="tiny dim">Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee and Workday pages are read through their public APIs; other sites through their job listings.</div>
       </div>
     </Sheet>
+  );
+}
+
+/** The browser extension as the web app's native layer: shows whether it is connected and how to add it. */
+export function BrowserHelperCard() {
+  const app = useApp();
+  const target = useApplyTarget();
+  const [busy, setBusy] = useState(false);
+  if (target === 'app') return null; // the phone app fills forms itself
+  const ext = extSnapshot();
+  const check = async () => { setBusy(true); try { const ok = await detectExtension({ wait: 1200 }); app.toast(ok ? 'Browser helper connected' : 'Not found yet. Finish the steps below, then check again.', ok ? 'success' : 'info'); } finally { setBusy(false); } };
+  return (
+    <div className="card pad col" style={{ gap: 10 }} data-testid="browser-helper">
+      <div className="row between"><div className="section-title" style={{ margin: 0 }}><Puzzle size={14} />Browser helper</div>
+        <span className={`badge ${target === 'browser' ? 'green' : 'amber'}`} data-testid="helper-status">{target === 'browser' ? `Connected${ext.version ? ` · v${ext.version}` : ''}` : 'Not connected'}</span></div>
+      <div className="tiny dim">{target === 'browser' ? 'Apply in browser opens the job in a new tab and fills it from your profile, answers and resume. You review and press Submit.' : 'Lets this web app fill job application forms in Chrome or Edge on this computer. Your details go from this page to the extension and then only to the job site you are applying on.'}</div>
+      {target !== 'browser' && (
+        <ol className="small muted" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+          <li><a href="/applypilot-extension.zip" download>Download the extension</a> and unzip it.</li>
+          <li>Open <span className="kbd">chrome://extensions</span> (Edge: <span className="kbd">edge://extensions</span>), turn on <b style={{ color: 'var(--fg)' }}>Developer mode</b>, choose <b style={{ color: 'var(--fg)' }}>Load unpacked</b> and pick the unzipped folder.</li>
+          <li>In its options, add this address: <button type="button" className="kbd" onClick={async () => { await copyText(window.location.origin); app.toast('Address copied', 'success'); }} title="Copy">{window.location.origin}</button></li>
+          <li>Come back and press <b style={{ color: 'var(--fg)' }}>Check again</b>.</li>
+        </ol>
+      )}
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <Button icon={RefreshCw} loading={busy} onClick={check} data-testid="helper-check">Check again</Button>
+        {target !== 'browser' && <Button icon={Download} onClick={() => openUrl(new URL('/applypilot-extension.zip', window.location.href).href)}>Download</Button>}
+      </div>
+    </div>
   );
 }
 

@@ -20,6 +20,7 @@ const MODULES = [
   { name: 'eligibility.js' },
   { name: 'match.js' },
   { name: 'tailoredResume.js', pick: ['norm', 'verifyTruthful', 'esc', 'renderHtml', 'docToText'] },
+  { name: 'resume.js', pick: ['experienceSection', 'MONTHS', 'IN_STATES', 'guessLabelled', 'DEGREES', 'BRANCHES', 'guessEducation', 'guessProfile'] },
   { name: 'csvImport.js', pick: ['parseCsv', 'toRecords', 'parseLinkedInConnections', 'SUFFIX', 'normCompany', 'sameCompany', 'COLS', 'detectColumns', 'mapStatus', 'parseTrackerCsv'] },
 ];
 const PORTED = new Set(MODULES.map((m) => m.name));

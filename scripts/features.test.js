@@ -107,6 +107,30 @@ function mockServer(port) {
     assert.strictEqual(isExcluded(senior, { profile: { country: 'India' } }), null, 'unknown experience never excludes');
   });
 
+  await check('a fresher never sees Senior / Staff / Principal / Lead titles; trainee and junior titles stay', async () => {
+    const fresher = { totalYearsExperience: 0, country: 'India' };
+    const title = (t, d = '') => ({ title: t, description: d, location: 'India' });
+    for (const t of ['Senior Engineer, Tech support', 'Associate Staff Engineer', 'Lead Developer', 'Associate Principal Engineer']) assert.ok(/Senior-level/.test(isExcluded(title(t), { profile: fresher }) || ''), t + ' should be excluded');
+    for (const t of ['Graduate Engineer Trainee', 'Junior Linux Kernel Engineer', 'Associate Engineer', 'Senior Trainee Engineer', 'Internal Systems Engineer']) assert.strictEqual(isExcluded(title(t), { profile: fresher }), null, t + ' should stay');
+    assert.strictEqual(isExcluded(title('Senior Engineer'), { profile: { ...fresher, totalYearsExperience: 4 } }), null, 'only for 0-1 years');
+    assert.strictEqual(isExcluded(title('Senior Engineer'), { profile: fresher, campaign: { skipExperienceGap: false } }), null, 'can be switched off');
+    assert.strictEqual(isExcluded(title('Senior Engineer'), { profile: { country: 'India' } }), null, 'unknown experience never excludes');
+  });
+
+  await check('the resume reader takes only labelled personal details (birth date, nationality, languages known, state) and no stray values', async () => {
+    const resumeLib = require(path.join(ROOT, 'electron', 'resume'));
+    const t = 'SHAIK SAHUL\nEmail :a.b@example.com Mobile:+91-6302803424\nTECHNICAL SKILL SET\n- Languages : C, Basics of Python\nPERSONAL INFORMATION\nName : Shaik Sahul\nDate of Birth : 2nd November 2000.\nNationality : INDIAN.\nLanguages Known : English, Hindi and Telugu\nAddress : D-N0: 2-175/1\nJandrapet,\nPrakasam District\nAndhra Pradesh.';
+    const g = resumeLib.guessProfile(t);
+    assert.strictEqual(g.dateOfBirth, '2000-11-02');
+    assert.strictEqual(g.nationality, 'Indian');
+    assert.deepStrictEqual(g.languages, ['English', 'Hindi', 'Telugu']);
+    assert.strictEqual(g.state, 'Andhra Pradesh');
+    assert.strictEqual(g.country, 'India');
+    const none = resumeLib.guessProfile('Jane Doe\nSkills: Python\nBorn in 1990. Languages: C, Go');
+    assert.ok(!none.dateOfBirth && !none.languages && !none.state, 'nothing is guessed without a label');
+    assert.ok(!resumeLib.guessProfile('Date of Birth : 2nd November 2026').dateOfBirth, 'a birth year in the future or under 15 years ago is refused');
+  });
+
   console.log('\nResume and apply fixes found in a live run');
   const resumeLib = require(path.join(ROOT, 'electron', 'resume'));
   const domLib = require(path.join(ROOT, 'electron', 'apply', 'dom'));

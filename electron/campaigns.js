@@ -16,7 +16,13 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 });
 
 function fillTemplate(tpl, job, profile) {
-  return (tpl || '').replace(/\{(\w+)\}/g, (m, k) => ({
+  let t = tpl || '';
+  // The stock sentence "With 0 years of experience in X" is untrue-sounding for a beginner: they get a true one instead.
+  const yrs = Number(profile.totalYearsExperience);
+  if (profile.totalYearsExperience !== undefined && profile.totalYearsExperience !== '' && yrs < 1) {
+    t = t.split('With {years} years of experience in {skills}').join((profile.skills || []).length ? 'As a recent graduate skilled in {skills}' : 'As a recent graduate');
+  }
+  return t.replace(/\{(\w+)\}/g, (m, k) => ({
     company: job.company, title: job.title, firstName: profile.firstName, lastName: profile.lastName,
     skills: (profile.skills || []).slice(0, 5).join(', '), years: profile.totalYearsExperience,
   }[k] ?? m));

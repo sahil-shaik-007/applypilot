@@ -6,7 +6,7 @@ import { Button, Logo, ScoreRing, Empty, Seg, timeAgo, salary } from '../compone
 import { JobSheet, QuickFillSheet } from '../components/jobs.jsx';
 import { startInAppApply, UnansweredList, ReviewAndApply } from '../components/apply.jsx';
 import { AUTO_ATS, patchApplication, sendToLaptop, openExternal } from '../lib/apply.js';
-import { canApplyInApp } from '../lib/bridge.js';
+import { useApplyTarget } from '../lib/bridge.js';
 import { useApplySessions, resolveSubmit, openQuestions } from '../lib/applyFlow.js';
 import { profileIdOfApplication } from '../lib/profiles.js';
 
@@ -18,7 +18,8 @@ function Check2({ on, onClick, label }) {
 
 export default function Queue({ params }) {
   const app = useApp();
-  const native = canApplyInApp();
+  const target = useApplyTarget();
+  const native = target !== 'none';
   const [sel, setSel] = useState(new Set());
   const [camp, setCamp] = useState(params.campaign || 'all');
   const [mode, setMode] = useState(app.settings.defaultApplyMode === 'auto' ? 'auto' : 'review');

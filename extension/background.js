@@ -1,8 +1,8 @@
 // ApplyPilot extension service worker: owns the bridge connection and runs the two flows
 // (save job / autofill) on the tab the user invoked the extension on (activeTab).
-/* global chrome, importScripts, ApBridge */
+/* global chrome, importScripts, ApBridge, ApWebApply */
 'use strict';
-importScripts('lib/bridge-client.js');
+importScripts('lib/bridge-client.js', 'lib/ats.js', 'lib/web-apply.js');
 
 const DEFAULT_SETTINGS = { attachResume: true, highlight: true, learn: true, defaultStatus: 'saved', overwrite: false };
 async function getSettings() { return { ...DEFAULT_SETTINGS, ...((await chrome.storage.local.get(['settings'])).settings || {}) }; }
@@ -139,11 +139,54 @@ const flows = {
     if (!items || !items.length) return { added: 0, updated: 0, none: true };
     return ApBridge.apCall('/answers', { method: 'POST', body: { items } });
   },
+  // Web app (docs/WEB-BRIDGE.md): the addresses whose pages may talk to this extension. The built-in ones are the
+  // localhost dev ports in the manifest; the others are added in the options and registered as content scripts.
+  async webApps() {
+    const { webApps = [], webSeen = {} } = await chrome.storage.local.get(['webApps', 'webSeen']);
+    const builtin = [...new Set(chrome.runtime.getManifest().content_scripts.flatMap((c) => c.matches).map((p) => p.replace(/\/\*$/, '')))];
+    return { builtin, custom: webApps, seen: webSeen };
+  },
+  async webAppAdd({ origin }) {
+    const o = normalizeWebOrigin(origin);
+    if (!(await chrome.permissions.contains({ origins: [`${o}/*`] }))) throw new Error('Permission for this address was not granted.');
+    const { webApps = [] } = await chrome.storage.local.get(['webApps']);
+    if (!webApps.includes(o)) await chrome.storage.local.set({ webApps: [...webApps, o].slice(0, 10) });
+    await syncWebApps();
+    // Tabs that were already open on this address get the bridge now instead of after a reload.
+    const tabs = await chrome.tabs.query({ url: `${o}/*` }).catch(() => []);
+    for (const t of tabs) await chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['content/webapp-bridge.js'] }).catch(() => {});
+    return flows.webApps();
+  },
+  async webAppRemove({ origin }) {
+    const { webApps = [] } = await chrome.storage.local.get(['webApps']);
+    await chrome.storage.local.set({ webApps: webApps.filter((x) => x !== origin) });
+    await syncWebApps();
+    return flows.webApps();
+  },
   async settings({ patch }) {
     if (patch) await chrome.storage.local.set({ settings: { ...(await getSettings()), ...patch } });
     return getSettings();
   },
 };
+
+// https://… or http://localhost / 127.0.0.1 (any port): the web app's own address, nothing else.
+function normalizeWebOrigin(input) {
+  let u;
+  try { u = new URL(String(input || '').trim()); } catch { throw new Error('Enter the address of your ApplyPilot web app, for example https://applypilot.example.com'); }
+  const local = u.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(u.hostname);
+  if (u.protocol !== 'https:' && !local) throw new Error('The address must start with https:// (or be http://localhost).');
+  if (u.username || u.password) throw new Error('Remove the user name and password from the address.');
+  return u.origin;
+}
+const WEB_SCRIPT_ID = 'ap-webapp-custom';
+async function syncWebApps() {
+  const { webApps = [] } = await chrome.storage.local.get(['webApps']);
+  const have = (await chrome.scripting.getRegisteredContentScripts({ ids: [WEB_SCRIPT_ID] }).catch(() => [])).length > 0;
+  if (!webApps.length) { if (have) await chrome.scripting.unregisterContentScripts({ ids: [WEB_SCRIPT_ID] }); return; }
+  const script = { id: WEB_SCRIPT_ID, matches: webApps.map((o) => `${o}/*`), js: ['content/webapp-bridge.js'], runAt: 'document_start', persistAcrossSessions: true };
+  if (have) await chrome.scripting.updateContentScripts([script]); else await chrome.scripting.registerContentScripts([script]);
+}
+chrome.runtime.onStartup.addListener(() => { syncWebApps().catch(() => {}); });
 
 function fillTemplate(tpl, job, p) {
   return String(tpl || '').replace(/\{(\w+)\}/g, (m, k) => ({
@@ -190,6 +233,8 @@ function resumeSummary(data, s, plan) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
+  // The web app bridge (content/webapp-bridge.js) and the engine shim in a job tab (lib/web-apply.js checks both).
+  if (msg.apWeb || msg.apEngine) return ApWebApply.onMessage(msg, sender, sendResponse);
   // Answers learned when you submit a form (sent by content/autofill.js).
   if (msg.type === 'learnAnswers') {
     if (!sender.tab || sender.id !== chrome.runtime.id) return false;
@@ -233,5 +278,6 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 chrome.runtime.onInstalled.addListener(async (d) => {
+  syncWebApps().catch(() => {});
   if (d.reason === 'install' && !(await ApBridge.apStore.get())) chrome.runtime.openOptionsPage();
 });

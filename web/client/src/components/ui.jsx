@@ -127,13 +127,16 @@ export function Seg({ value, options, onChange, full }) {
   );
 }
 
-export function Field({ label, required, help, children, className = '' }) {
+// A <label> hands a click on its text to its first control. For groups of buttons (Yes/No, chips) that would press
+// the first button ("Yes") whenever the question is tapped, so those use group={true}: a plain element, no label.
+export function Field({ label, required, help, children, className = '', group = false }) {
+  const Tag = group ? 'div' : 'label';
   return (
-    <label className={`field ${className}`}>
+    <Tag className={`field ${className}`} {...(group ? { role: 'group', 'aria-label': label } : {})}>
       {label && <span className="field-label">{label}{required && <span className="req">*</span>}</span>}
       {children}
       {help && <span className="help">{help}</span>}
-    </label>
+    </Tag>
   );
 }
 

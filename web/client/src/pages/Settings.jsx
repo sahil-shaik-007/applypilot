@@ -6,7 +6,7 @@ import { api, post } from '../lib/api.js';
 import { Button, Sheet, Field, timeAgo, copyText, downloadFile } from '../components/ui.jsx';
 import { useDevices } from './Home.jsx';
 import { NewPassphraseFields, RecoveryKeyPanel, passphraseStrength } from './Vault.jsx';
-import { ApplyingCard, CareerPagesCard } from '../components/settingsCards.jsx';
+import { ApplyingCard, BrowserHelperCard, CareerPagesCard } from '../components/settingsCards.jsx';
 
 // The name shown in the portal. Editable here at any time (it is not the Google or sign-in email).
 function PortalName() {
@@ -157,6 +157,7 @@ export default function Settings() {
       </div>
 
       <ApplyingCard />
+      <BrowserHelperCard />
       <CareerPagesCard />
 
       <div className="card pad col" style={{ gap: 10 }}>

@@ -36,6 +36,46 @@ async function pair() {
   refresh().then((p) => p && msg('Paired. Open any job posting and click the ApplyPilot icon.', 'ok'));
 }
 
+// ---- web app: which page may drive "Apply in browser" (docs/WEB-BRIDGE.md)
+function webMsg(text, kind) { const el = $('webMsg'); el.textContent = text; el.className = `msg ${kind || ''}`; el.classList.toggle('hidden', !text); }
+function renderWeb(w) {
+  const custom = w.custom || [];
+  $('webDot').className = `dot ${custom.length ? 'on' : ''}`;
+  $('webText').textContent = custom.length ? 'Web app: connected' : 'Web app: not set';
+  const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+  const rows = [...custom.map((o) => ({ o, own: true })), ...(w.builtin || []).map((o) => ({ o, own: false }))].map(({ o, own }) => {
+    const li = document.createElement('li'); li.className = 'row';
+    const s = document.createElement('span'); s.className = 'grow'; s.style.flex = '1';
+    s.textContent = `${o}${own ? '' : ' (built-in, local development)'}${(w.seen || {})[o] ? ` · seen ${ago(w.seen[o])}` : ''}`;
+    li.appendChild(s);
+    if (own) {
+      const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = 'Remove';
+      b.addEventListener('click', async () => { const r = await send({ type: 'webAppRemove', origin: o }); if (r.ok) renderWeb(r.data); else webMsg(r.error, 'err'); });
+      li.appendChild(b);
+    }
+    return li;
+  });
+  $('webList').replaceChildren(...rows);
+}
+async function addWeb() {
+  let origin;
+  try {
+    const u = new URL($('webOrigin').value.trim());
+    if (u.protocol !== 'https:' && !(u.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(u.hostname))) throw new Error('scheme');
+    origin = u.origin;
+  } catch { webMsg('Enter the address of your ApplyPilot web app, starting with https:// (or http://localhost).', 'err'); return; }
+  // Asked first, straight from the click. Addresses the extension already covers are granted without a prompt.
+  let granted = false;
+  try { granted = (await chrome.permissions.contains({ origins: [`${origin}/*`] })) || (await chrome.permissions.request({ origins: [`${origin}/*`] })); } catch { granted = false; }
+  if (!granted) { webMsg('Permission for this address was not granted.', 'err'); return; }
+  const r = await send({ type: 'webAppAdd', origin });
+  if (!r.ok) { webMsg(r.error, 'err'); return; }
+  $('webOrigin').value = '';
+  renderWeb(r.data);
+  webMsg('Added. Reload the web app if it was already open, then use Apply in browser.', 'ok');
+}
+async function loadWeb() { const r = await send({ type: 'webApps' }); if (r.ok) renderWeb(r.data); }
+
 async function loadSettings() {
   const r = await send({ type: 'settings' });
   const s = r.ok ? r.data : {};
@@ -52,5 +92,8 @@ async function loadSettings() {
 $('pairBtn').addEventListener('click', pair);
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') pair(); });
 $('unpairBtn').addEventListener('click', async () => { await send({ type: 'unpair' }); msg('Unpaired. This browser can no longer reach ApplyPilot.', 'ok'); refresh(); });
+$('webAdd').addEventListener('click', addWeb);
+$('webOrigin').addEventListener('keydown', (e) => { if (e.key === 'Enter') addWeb(); });
 loadSettings();
+loadWeb();
 refresh();

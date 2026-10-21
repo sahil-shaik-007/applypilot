@@ -8,7 +8,7 @@ import { getProfile, pickResumeFor, profileIdOfApplication } from '../lib/profil
 import { ResumeSelect } from '../components/jobs.jsx';
 import { TailoredCard, startInAppApply, UnansweredList, ReviewAndApply } from '../components/apply.jsx';
 import { openQuestions } from '../lib/applyFlow.js';
-import { canApplyInApp } from '../lib/bridge.js';
+import { useApplyTarget } from '../lib/bridge.js';
 import { outreach, interviewPrep, aiError, DEFAULT_MODEL } from '../lib/ai.js';
 import { importTracker, exportWorkLog, exportTrackerCsv, readCsvFile } from '../lib/trackerIo.js';
 
@@ -31,7 +31,8 @@ function AppSheet({ a, onClose }) {
   const [busy, setBusy] = useState(null);
   const [ai, setAi] = useState({});
   useEffect(() => { setNotes(a ? a.notes || '' : ''); setAi({}); }, [a && a.id]); // eslint-disable-line
-  const native = canApplyInApp();
+  const target = useApplyTarget();
+  const native = target !== 'none';
   const runAi = async (k, fn, extra = {}) => {
     const resume = pickResumeFor(app, a.job, a.resumeId || 'auto', a.profileId);
     setBusy(k);
@@ -76,7 +77,7 @@ function AppSheet({ a, onClose }) {
           </div>
           {['saved', 'queued', 'failed', 'awaiting-you'].includes(a.status) && (
             <div className={native && a.status !== 'awaiting-you' ? 'grid g2' : 'col'} style={{ gap: 8 }}>
-              {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} onClick={async () => { setBusy('inapp'); try { await startInAppApply(app, { applicationId: a.id }); } finally { setBusy(null); } }} data-testid="app-apply-inapp">{a.status === 'awaiting-you' || a.status === 'failed' ? 'Retry in app' : 'Apply in app'}</Button>}
+              {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} onClick={async () => { setBusy('inapp'); try { await startInAppApply(app, { applicationId: a.id }); } finally { setBusy(null); } }} data-testid="app-apply-inapp">{a.status === 'awaiting-you' || a.status === 'failed' ? (target === 'browser' ? 'Retry in browser' : 'Retry in app') : (target === 'browser' ? 'Apply in browser' : 'Apply in app')}</Button>}
               {a.status !== 'awaiting-you' && <Button icon={Laptop} loading={busy === 'send'} onClick={async () => { setBusy('send'); try { await sendToLaptop(app, { ...a.job, id: a.jobId, match: a.match }, { resumeId: a.resumeId || 'auto', profileId: a.profileId }); app.toast('Sent to your laptop', 'success'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(null); } }}>Send to laptop</Button>}
             </div>
           )}

@@ -281,7 +281,7 @@ export function JobSheet({ job, onClose }) {
                   <div className="section-title" style={{ margin: 0 }}><Smartphone size={14} />{target === 'browser' ? 'Applying in this browser' : 'Applying on your phone'}</div>
                   <div className="small muted">{target === 'browser' ? 'Apply in browser opens the application in a new tab and the ApplyPilot extension fills it from your profile, answers and resume. You press Submit. Quick-fill gives one-tap copy for every field.' : native ? 'Apply in app opens the form inside ApplyPilot and fills it from your profile, answers and resume. Quick-fill gives one-tap copy for every field.' : 'We open the application in a new tab and give you one-tap copy for every field. To have the form filled for you on this computer, add the ApplyPilot browser helper (Settings → Browser helper).'}</div>
                   {native && <Button variant="primary" icon={Zap} loading={busy === 'inapp'} disabled={scam} onClick={applyHere} data-testid="apply-inapp">{applyWord}</Button>}
-                  <Button icon={Copy} disabled={scam} onClick={() => setQuick(true)} data-testid="open-quickfill">Open Quick-fill</Button>
+                  <Button icon={Copy} disabled={scam} onClick={() => { if (!native) openExternal(job.applyUrl || job.url); setQuick(true); }} data-testid="open-quickfill">Open Quick-fill</Button>
                   <Button icon={Check} loading={busy === 'applied'} disabled={application && application.status === 'applied'} onClick={() => run('applied', () => upsertApplication(app, job, 'applied', { resumeId, profileId: activePid }), 'Marked as applied')}>Mark as applied</Button>
                 </div>
                 {application && (

@@ -311,7 +311,7 @@ async function main() {
     await page.locator('[data-testid="match-breakdown"]').waitFor();
     jobTitle = (await page.locator('[data-testid="job-title"]').textContent()).trim();
     // Pick a job we can actually apply to (not scam-flagged).
-    for (let i = 1; i < 6 && await page.locator('[data-testid="apply-here"]').isDisabled(); i++) {
+    for (let i = 1; i < 6 && await page.locator('[data-testid="send-laptop"]').isDisabled(); i++) {
       await page.keyboard.press('Escape'); await page.waitForTimeout(300);
       await cards.nth(i).click(); await page.locator('[data-testid="match-breakdown"]').waitFor();
       jobTitle = (await page.locator('[data-testid="job-title"]').textContent()).trim();
@@ -322,7 +322,8 @@ async function main() {
   });
   await check('apply on phone → quick-fill one-tap copy', async () => {
     const popup = context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
-    await page.click('[data-testid="apply-here"]');
+    await page.getByRole('tab', { name: 'Apply', exact: true }).click();
+    await page.click('[data-testid="open-quickfill"]');
     await page.locator('[data-testid="quickfill"]').waitFor();
     assert((await popup) || popups.length >= 1, 'job application should open in a new tab');
     await page.click('[data-copy-key="Email"]');
@@ -340,7 +341,8 @@ async function main() {
   });
   await check('send to laptop → encrypted outbox item', async () => {
     await page.click('[data-testid="send-laptop"]');
-    await toast(/Sent to your laptop/);
+    await page.click('[data-testid="confirm-apply"]'); // the pre-send check
+    await toast(/Sent. Your laptop/);
     const items = await api('/items?collection=outbox');
     const live = items.body.items.filter((i) => !i.deleted);
     assert(live.length === 1, `expected 1 outbox item, got ${live.length}`);
@@ -562,7 +564,8 @@ async function main() {
   });
 
   await check('tracker import (Teal CSV, duplicates skipped) + work-search log export', async () => {
-    const csv = 'Company,Job Position,Status,Date Applied,URL,Location\nGlobex,Platform Engineer,Interviewing,2026-09-20,https://globex.example/jobs/1,Remote\nInitech,Backend Developer,Applied,2026-09-25,,Austin\nGlobex,Platform Engineer,Applied,2026-09-21,,\n';
+    const ago = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10); // inside the 4-week window whatever today is
+    const csv = 'Company,Job Position,Status,Date Applied,URL,Location\nGlobex,Platform Engineer,Interviewing,' + ago(10) + ',https://globex.example/jobs/1,Remote\nInitech,Backend Developer,Applied,' + ago(5) + ',,Austin\nGlobex,Platform Engineer,Applied,' + ago(9) + ',,\n';
     const p = path.join(tmpDir, 'teal-export.csv'); fs.writeFileSync(p, csv);
     await tab('applied');
     await page.click('[data-testid="tracker-tools-open"]');
